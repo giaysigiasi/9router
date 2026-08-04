@@ -462,6 +462,10 @@ Default URLs:
         <img src="./public/providers/siliconflow.png" width="50" alt="SiliconFlow"/><br/>
         <sub>SiliconFlow</sub>
       </td>
+      <td align="center" width="100">
+        <img src="./public/providers/cheapkey.png" width="50" alt="Cheap Key"/><br/>
+        <sub>Cheap Key</sub>
+      </td>
     </tr>
   </table>
   <p><i>...and 20+ more providers including Nebius, Chutes, Hyperbolic, and custom OpenAI/Anthropic compatible endpoints</i></p>
@@ -700,6 +704,7 @@ Seamless translation between formats:
 |                     | GitHub Copilot        | $10-19/mo    | Monthly          | GitHub users                            |
 |                     | Cursor IDE            | $20/mo       | Monthly          | Cursor users                            |
 | **💰 CHEAP**        | GLM-5.1 / GLM-4.7     | $0.6/1M      | Daily 10AM       | Budget backup                           |
+|                     | Cheap Key             | $0.1/1M      | Monthly          | Cheapest OpenAI-compatible backup       |
 |                     | MiniMax M2.7          | $0.2/1M      | 5-hour rolling   | Cheapest option                         |
 |                     | Kimi K2.5             | $9/mo flat   | 10M tokens/mo    | Predictable cost                        |
  | **🆓 FREE**         | Kiro AI               | $0           | 50 credits/mo    | Claude 4.5 + GLM-5 + MiniMax free (paid tiers above) |
@@ -1005,6 +1010,16 @@ Models:
 **Use:** `glm/glm-5.1`, `glm/glm-5`, `glm/glm-4.7`
 
 **Pro Tip:** Coding Plan offers 3× quota at 1/7 cost! Reset daily 10:00 AM.
+
+### Cheap Key ($0.1/1M)
+
+1. Sign up: [Cheap Key API](https://api.cheapkey.io)
+2. Get API key
+3. Dashboard → Add API Key:
+   - Provider: `cheapkey`
+   - API Key: `your-key`
+
+**Use:** `cheapkey/gpt-4o`, `cheapkey/claude-3-5-sonnet`
 
 ### MiniMax M2.7 (5h reset, $0.20/1M)
 

@@ -356,6 +356,7 @@ export async function POST(request) {
         case "groq":
         case "xai":
         case "mistral":
+        case "responses":
         case "perplexity":
         case "together":
         case "fireworks":

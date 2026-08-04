@@ -116,6 +116,7 @@ import p113 from "./morph.js";
 // import p104 from "./windsurf.js";
 import p115 from "./poolside.js";
 import p116 from "./tokenrouter.js";
+import p116b from "./responses.js";
 import p117 from "./selfhosted-stt.js";
 import p118 from "./selfhosted-tts.js";
 import p119 from "./selfhosted-embedding.js";
@@ -238,6 +239,7 @@ export default [
   // p104, // windsurf — hidden, no tool calling
   p115,
   p116,
+  p116b,
   p117,
   p118,
   p119,
