@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Card, Button, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
+import Card from "@/shared/components/Card";
+import Button from "@/shared/components/Button";
+import Input from "@/shared/components/Input";
+import Modal, { ConfirmModal } from "@/shared/components/Modal";
+import Toggle from "@/shared/components/Toggle";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { getCurrentLocale, onLocaleChange } from "@/i18n/runtime";
 import {

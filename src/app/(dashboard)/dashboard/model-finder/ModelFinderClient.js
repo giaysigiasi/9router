@@ -1,16 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Input } from "@/shared/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/components/ui/table";
-import { Badge } from "@/shared/components/ui/badge";
+import Input from "@/shared/components/Input";
+import Badge from "@/shared/components/Badge";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { Check, Copy } from "lucide-react";
 
@@ -83,41 +75,41 @@ export default function ModelFinderClient() {
           ))}
         </select>
       </div>
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Model Name</TableHead>
-              <TableHead>Provider</TableHead>
-              <TableHead>Capabilities</TableHead>
-              <TableHead>Model ID</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      <div className="border rounded-lg overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model Name</th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider</th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Capabilities</th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model ID</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
             {filteredModels.map((model) => (
-              <TableRow key={model.id}>
-                <TableCell className="font-medium">{model.model_name}</TableCell>
-                <TableCell>{model.provider_name}</TableCell>
-                <TableCell>
+              <tr key={model.id}>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{model.model_name}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.provider_name}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <div className="flex gap-1">
                     {model.capabilities?.vision && <Badge variant="outline">Vision</Badge>}
                     {model.capabilities?.json && <Badge variant="outline">JSON</Badge>}
                     {model.capabilities?.tools && <Badge variant="outline">Tools</Badge>}
                     {model.capabilities?.image && <Badge variant="outline">Image</Badge>}
                   </div>
-                </TableCell>
-                <TableCell>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <div className="flex items-center gap-2">
                     <span>{model.id}</span>
                     <button onClick={() => handleCopy(model.id)} className="p-1">
                       {isCopied ? <Check size={16} /> : <Copy size={16} />}
                     </button>
                   </div>
-                </TableCell>
-              </TableRow>
+                </td>
+              </tr>
             ))}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
       </div>
     </div>
   );

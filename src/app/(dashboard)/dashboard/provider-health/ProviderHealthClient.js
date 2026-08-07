@@ -1,14 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/components/ui/table";
 import Button from "@/shared/components/Button";
 import { RefreshCw } from "lucide-react";
 
@@ -49,41 +41,41 @@ export default function ProviderHealthClient() {
           <span className="ml-2">Refresh</span>
         </Button>
       </div>
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Provider</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Avg Latency (ms)</TableHead>
-              <TableHead>Error Rate</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      <div className="border rounded-lg overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider</th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Latency (ms)</th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error Rate</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
             {loading ? (
-              <TableRow>
-                <TableCell colSpan="4" className="text-center">
+              <tr>
+                <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">
                   Loading...
-                </TableCell>
-              </TableRow>
+                </td>
+              </tr>
             ) : healthData.length > 0 ? (
               healthData.map((provider) => (
-                <TableRow key={provider.name}>
-                  <TableCell className="font-medium">{provider.name}</TableCell>
-                  <TableCell>{getStatusIcon(provider.status)} {provider.status}</TableCell>
-                  <TableCell>{provider.latency}</TableCell>
-                  <TableCell>{provider.errorRate}%</TableCell>
-                </TableRow>
+                <tr key={provider.name}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{provider.name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{getStatusIcon(provider.status)} {provider.status}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{provider.latency}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{provider.errorRate}%</td>
+                </tr>
               ))
             ) : (
-              <TableRow>
-                <TableCell colSpan="4" className="text-center">
+              <tr>
+                <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">
                   No health data available.
-                </TableCell>
-              </TableRow>
+                </td>
+              </tr>
             )}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
       </div>
     </div>
   );

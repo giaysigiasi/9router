@@ -1,0 +1,29 @@
+# 9Router Continuity Rules
+
+## Workflow
+- Plan with `combo-plan-max`.
+- Act with `combo-act-tool-safe`.
+- Verify with `combo-verify-cheap`.
+- Keep `.agent-output/current-task-handoff.md` updated.
+
+## Tool Safety
+- One tool call per message.
+- Check required tool params before calling.
+- `execute_command` needs `command` and `requires_approval`.
+- `read_file` needs `path`.
+- `write_to_file` needs `path` and complete `content`.
+- `search_files` needs `path` and `regex`.
+- `replace_in_file` needs exact full-line SEARCH from latest file content.
+- If replace/search fails, read file before retry.
+
+## Model Switch
+After switch:
+1. Read `.agent-output/current-task-handoff.md`.
+2. Run `git diff --stat`.
+3. Read target file before editing.
+4. Continue from `Next Single Action`.
+5. Do not redo completed work.
+
+## Context Budget
+- Above 70% context: update handoff.
+- Above 85% context: produce handoff only.

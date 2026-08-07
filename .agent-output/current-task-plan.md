@@ -1,0 +1,19 @@
+# Current Task Plan
+
+## Objective
+...
+
+## Files To Inspect
+...
+
+## Smallest Safe Change
+...
+
+## Acceptance Checks
+...
+
+## Rollback Risk
+...
+
+## Out Of Scope
+...

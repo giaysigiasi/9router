@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Textarea } from "@/shared/components";
+import Button from "@/shared/components/Button";
+import Card from "@/shared/components/Card";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -55,11 +56,11 @@ export default function RouteSimulatorClient() {
         <div className="grid md:grid-cols-2 gap-6 p-6">
           <div>
             <h3 className="text-lg font-semibold mb-2">Request Body</h3>
-            <Textarea
+            <textarea
               value={requestBody}
               onChange={(e) => setRequestBody(e.target.value)}
               rows={15}
-              className="font-mono text-sm"
+              className="w-full p-2 border rounded-md font-mono text-sm bg-gray-900 text-white"
               placeholder='{ "model": "gpt-4", "messages": [...] }'
             />
             <Button onClick={handleSimulate} disabled={isLoading} className="mt-4">
