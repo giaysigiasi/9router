@@ -25,6 +25,10 @@ const navItems = [
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
+  { href: "/dashboard/model-finder", label: "Model Finder", icon: "search" },
+  { href: "/dashboard/provider-health", label: "Provider Health", icon: "health_and_safety" },
+  { href: "/dashboard/provider-onboard", label: "Onboard Provider", icon: "add_business" },
+  { href: "/dashboard/route-simulator", label: "Route Simulator", icon: "fork_right" },
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
 ];

@@ -9,6 +9,8 @@ import {
   CAVEMAN_LEVELS,
   PONYTAIL_LEVELS,
 } from "../endpoint/endpointConstants";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 export default function TokenSaverClient() {
   const [rtkEnabled, setRtkEnabledState] = useState(true);
@@ -58,6 +60,8 @@ export default function TokenSaverClient() {
   const [pxpipeActionLoading, setPxpipeActionLoading] = useState(false);
   const [pxpipeActionError, setPxpipeActionError] = useState("");
   const [locale, setLocale] = useState("en");
+  const [previewConfig, setPreviewConfig] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   const { copied, copy } = useCopyToClipboard();
 
@@ -430,7 +434,20 @@ export default function TokenSaverClient() {
       } catch {}
     };
     loadSettings();
+    fetchPreviewConfig();
   }, [refreshHeadroomStatus, refreshPxpipeStatus, runPxpipeHealth]);
+
+  const fetchPreviewConfig = async () => {
+    try {
+      const res = await fetch("/api/token-saver/preview");
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewConfig(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch token saver preview:", error);
+    }
+  };
 
   const headroomRunning = !!headroomStatus.running;
   const headroomStatusLabel = headroomStatus.loading
@@ -778,6 +795,27 @@ export default function TokenSaverClient() {
           />
         </div>
         )}
+        <div className="pt-4 mt-4 border-t border-border">
+          <Button variant="outline" onClick={() => setShowPreview(!showPreview)}>
+            {showPreview ? "Hide" : "Show"} Current Config
+          </Button>
+          {showPreview && previewConfig && (
+            <div className="mt-4 rounded-lg bg-gray-900 p-4">
+              <h3 className="text-lg font-semibold mb-2">Token Saver Configuration</h3>
+              <SyntaxHighlighter language="json" style={vscDarkPlus}>
+                {JSON.stringify(previewConfig, null, 2)}
+              </SyntaxHighlighter>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+                onClick={() => copy(JSON.stringify(previewConfig, null, 2))}
+              >
+                {copied ? "Copied!" : "Copy JSON"}
+              </Button>
+            </div>
+          )}
+        </div>
       </Card>
 
       <Modal

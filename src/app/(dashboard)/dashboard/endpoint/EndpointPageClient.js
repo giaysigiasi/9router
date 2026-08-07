@@ -715,6 +715,7 @@ export default function APIPageClient({ machineId }) {
   }
 
   const currentEndpoint = baseUrl;
+  const activeKey = keys.find((key) => key.isActive !== false)?.key || "";
 
   return (
     <div className="flex flex-col gap-8">
@@ -962,6 +963,8 @@ export default function APIPageClient({ machineId }) {
           </div>
         )}
       </Card>
+
+      <CliSetupCard endpoint={currentEndpoint} apiKey={activeKey} copied={copied} onCopy={copy} />
 
       {/* API Keys */}
       <Card id="require-api-key">
@@ -1307,4 +1310,77 @@ export default function APIPageClient({ machineId }) {
 
 APIPageClient.propTypes = {
   machineId: PropTypes.string.isRequired,
+};
+
+function CliSetupCard({ endpoint, apiKey, copied, onCopy }) {
+  const configs = [
+    {
+      name: "Claude Code",
+      icon: "smart_toy",
+      text: `ANTHROPIC_BASE_URL=${endpoint}\nANTHROPIC_API_KEY=${apiKey}`,
+    },
+    {
+      name: "Cline",
+      icon: "code",
+      text: `OpenAI Compatible\nBase URL: ${endpoint}\nAPI Key: ${apiKey}`,
+    },
+    {
+      name: "Cursor",
+      icon: "edit",
+      text: `OpenAI Base URL: ${endpoint}\nAPI Key: ${apiKey}`,
+    },
+    {
+      name: "Codex",
+      icon: "terminal",
+      text: `OPENAI_BASE_URL=${endpoint}\nOPENAI_API_KEY=${apiKey}`,
+    },
+    {
+      name: "OpenCode",
+      icon: "terminal",
+      text: `OPENAI_BASE_URL=${endpoint}\nOPENAI_API_KEY=${apiKey}`,
+    },
+  ];
+
+  return (
+    <Card>
+      <div className="flex items-start gap-3 mb-4">
+        <span className="material-symbols-outlined text-primary">rocket_launch</span>
+        <div>
+          <h2 className="text-lg font-semibold">One-click CLI Setup</h2>
+          <p className="text-sm text-text-muted">Copy connection details for your coding tool.</p>
+        </div>
+      </div>
+
+      {apiKey ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {configs.map((config) => {
+            const copyId = `cli_${config.name.toLowerCase().replaceAll(" ", "_")}`;
+            return (
+              <div key={config.name} className="rounded-lg border border-border-subtle bg-surface-2/50 p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <span className="material-symbols-outlined text-[18px] text-primary">{config.icon}</span>
+                    {config.name}
+                  </span>
+                  <Button size="sm" variant="secondary" icon={copied === copyId ? "check" : "content_copy"} onClick={() => onCopy(config.text, copyId)}>
+                    {copied === copyId ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs text-text-muted font-mono">{config.text}</pre>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-sm text-text-muted">Create an active API key first. Setup snippets will appear here.</p>
+      )}
+    </Card>
+  );
+}
+
+CliSetupCard.propTypes = {
+  endpoint: PropTypes.string.isRequired,
+  apiKey: PropTypes.string,
+  copied: PropTypes.string,
+  onCopy: PropTypes.func.isRequired,
 };
