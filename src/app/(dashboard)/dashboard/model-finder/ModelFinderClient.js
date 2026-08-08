@@ -1,6 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { FREE_PROVIDERS, FREE_TIER_PROVIDERS, OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/providers";
+
+const REFRESH_OPTIONS = [
+  { value: 0, label: "Off" },
+  { value: 3600000, label: "1h" },
+  { value: 7200000, label: "2h" },
+  { value: 14400000, label: "4h" },
+];
+
+const GROUP_OPTIONS = [
+  { value: "all", label: "All Models" },
+  { value: "free", label: "Free (No Auth)" },
+  { value: "freeTier", label: "Free Tier" },
+  { value: "paid-apikey", label: "Paid - API Key" },
+  { value: "paid-oauth", label: "Paid - OAuth" },
+  { value: "byPrice", label: "By Input Credit" },
+];
 
 const ModelFinderClient = () => {
   const [models, setModels] = useState([]);
@@ -15,24 +32,30 @@ const ModelFinderClient = () => {
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [sortField, setSortField] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [refreshInterval, setRefreshInterval] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  const fetchModels = async () => {
+    try {
+      const response = await fetch("/api/models");
+      if (!response.ok) throw new Error("Failed to fetch models");
+      const data = await response.json();
+      setModels(data.models);
+      setLastUpdated(Date.now());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        const response = await fetch("/api/models");
-        if (!response.ok) {
-          throw new Error("Failed to fetch models");
-        }
-        const data = await response.json();
-        setModels(data.models);
-        setFilteredModels(data.models);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
+    if (typeof window === "undefined") return;
+    const savedGroup = localStorage.getItem("model-group");
+    if (savedGroup) setGroupFilter(savedGroup);
+    const savedRefresh = localStorage.getItem("model-refresh");
+    if (savedRefresh) setRefreshInterval(parseInt(savedRefresh, 10));
     fetchModels();
   }, []);
 
@@ -42,11 +65,33 @@ const ModelFinderClient = () => {
   }, []);
 
   useEffect(() => {
-    let filtered = models;
+    localStorage.setItem("model-group", groupFilter);
+  }, [groupFilter]);
+
+  useEffect(() => {
+    localStorage.setItem("model-refresh", String(refreshInterval));
+  }, [refreshInterval]);
+
+  useEffect(() => {
+    if (refreshInterval <= 0) return;
+    const id = setInterval(fetchModels, refreshInterval);
+    return () => clearInterval(id);
+  }, [refreshInterval]);
+
+  const getProviderCategory = (providerId) => {
+    if (FREE_PROVIDERS[providerId]) return "free";
+    if (FREE_TIER_PROVIDERS[providerId]) return "freeTier";
+    if (OAUTH_PROVIDERS[providerId]) return "paid-oauth";
+    if (APIKEY_PROVIDERS[providerId]) return "paid-apikey";
+    return "paid-apikey";
+  };
+
+  const filtered = useMemo(() => {
+    let result = models;
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
+      result = result.filter(
         (m) =>
           m.name.toLowerCase().includes(q) ||
           m.fullModel.toLowerCase().includes(q) ||
@@ -55,14 +100,26 @@ const ModelFinderClient = () => {
     }
 
     if (providerFilter) {
-      filtered = filtered.filter((m) => m.provider === providerFilter);
+      result = result.filter((m) => m.provider === providerFilter);
     }
 
     if (capabilityFilter) {
-      filtered = filtered.filter((m) => m.caps[capabilityFilter]);
+      result = result.filter((m) => m.caps[capabilityFilter]);
     }
 
-    filtered = [...filtered].sort((a, b) => {
+    if (groupFilter === "free") {
+      result = result.filter((m) => getProviderCategory(m.provider) === "free");
+    } else if (groupFilter === "freeTier") {
+      result = result.filter((m) => getProviderCategory(m.provider) === "freeTier");
+    } else if (groupFilter === "paid-apikey") {
+      result = result.filter((m) => getProviderCategory(m.provider) === "paid-apikey");
+    } else if (groupFilter === "paid-oauth") {
+      result = result.filter((m) => getProviderCategory(m.provider) === "paid-oauth");
+    } else if (groupFilter === "byPrice") {
+      result = [...result].sort((a, b) => (a.pricing?.input || 0) - (b.pricing?.input || 0));
+    }
+
+    result = [...result].sort((a, b) => {
       let av, bv;
       switch (sortField) {
         case "provider":
@@ -102,8 +159,8 @@ const ModelFinderClient = () => {
       return 0;
     });
 
-    setFilteredModels(filtered);
-  }, [searchQuery, providerFilter, capabilityFilter, models, sortField, sortDir]);
+    return result;
+  }, [models, searchQuery, providerFilter, capabilityFilter, groupFilter, sortField, sortDir]);
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -132,7 +189,6 @@ const ModelFinderClient = () => {
   const bulkDisable = async () => {
     setBulkActionLoading(true);
     try {
-      // Group by providerAlias
       const groups = {};
       selectedModels.forEach((fullModel) => {
         const model = models.find((m) => m.fullModel === fullModel);
@@ -152,7 +208,6 @@ const ModelFinderClient = () => {
         )
       );
 
-      // Refresh models
       const res = await fetch("/api/models");
       const data = await res.json();
       setModels(data.models);
@@ -168,6 +223,29 @@ const ModelFinderClient = () => {
   const bulkCopy = () => {
     const snippets = selectedModels.map((m) => `model: "${m}"`).join("\n");
     copyToClipboard(snippets);
+  };
+
+  const formatLastUpdated = () => {
+    if (!lastUpdated) return "";
+    const diff = Math.floor((Date.now() - lastUpdated) / 1000);
+    if (diff < 60) return "Just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
+  };
+
+  const getCategoryBadge = (providerId) => {
+    const cat = getProviderCategory(providerId);
+    if (cat === "free") return { label: "Free", color: "bg-green-100 text-green-800" };
+    if (cat === "freeTier") return { label: "Free Tier", color: "bg-blue-100 text-blue-800" };
+    return null;
+  };
+
+  const getPriceColor = (inputPrice) => {
+    if (!inputPrice && inputPrice !== 0) return "bg-gray-100 text-gray-800";
+    if (inputPrice === 0) return "bg-green-100 text-green-800";
+    if (inputPrice < 1) return "bg-blue-100 text-blue-800";
+    if (inputPrice < 5) return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-800";
   };
 
   if (loading) return <div>Loading models...</div>;
@@ -223,25 +301,63 @@ const ModelFinderClient = () => {
         </select>
 
         <select
-          value={sortField}
-          onChange={(e) => setSortField(e.target.value)}
+          value={groupFilter}
+          onChange={(e) => setGroupFilter(e.target.value)}
           className="p-2 border rounded"
         >
-          <option value="name">Sort: Name</option>
-          <option value="provider">Sort: Provider</option>
-          <option value="contextWindow">Sort: Context Window</option>
-          <option value="maxOutput">Sort: Max Output</option>
-          <option value="inputPrice">Sort: Input Price</option>
-          <option value="outputPrice">Sort: Output Price</option>
-          <option value="fullModel">Sort: Full Model ID</option>
+          {GROUP_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
         </select>
 
-        <button
-          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-          className="px-3 py-2 border rounded text-sm hover:bg-gray-50"
-        >
-          {sortDir === "asc" ? "↑ Asc" : "↓ Desc"}
-        </button>
+        <div className="flex items-center gap-2 border rounded p-1">
+          <span className="text-xs font-medium text-gray-600 px-1">Sort:</span>
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value)}
+            className="p-2 border rounded text-sm"
+          >
+            <option value="name">Name</option>
+            <option value="provider">Provider</option>
+            <option value="contextWindow">Context Window</option>
+            <option value="maxOutput">Max Output</option>
+            <option value="inputPrice">Input Price</option>
+            <option value="outputPrice">Output Price</option>
+            <option value="fullModel">Full Model ID</option>
+          </select>
+          <button
+            onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            className="px-3 py-2 border rounded text-sm hover:bg-gray-50 font-medium"
+          >
+            {sortDir === "asc" ? "↑ Asc" : "↓ Desc"}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 border rounded p-1">
+          <span className="text-xs font-medium text-gray-600 px-1">Refresh:</span>
+          <select
+            value={refreshInterval}
+            onChange={(e) => setRefreshInterval(parseInt(e.target.value, 10))}
+            className="p-2 border rounded text-sm"
+          >
+            {REFRESH_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={fetchModels}
+            className="px-3 py-2 border rounded text-sm hover:bg-gray-50 font-medium"
+          >
+            ↻
+          </button>
+          {lastUpdated && (
+            <span className="text-xs text-gray-500 px-1">{formatLastUpdated()}</span>
+          )}
+        </div>
       </div>
 
       {selectedModels.length > 0 && (
@@ -270,9 +386,11 @@ const ModelFinderClient = () => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredModels.map((model) => {
+        {filtered.map((model) => {
           const isSelected = selectedModels.includes(model.fullModel);
           const isFav = favorites.includes(model.fullModel);
+          const categoryBadge = getCategoryBadge(model.provider);
+          const priceColor = getPriceColor(model.pricing?.input);
           return (
             <div
               key={model.fullModel}
@@ -290,7 +408,7 @@ const ModelFinderClient = () => {
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="font-bold text-lg">{model.name}</h2>
                     <button
                       onClick={(e) => toggleFavorite(e, model)}
@@ -299,6 +417,16 @@ const ModelFinderClient = () => {
                     >
                       {isFav ? "⭐" : "☆"}
                     </button>
+                    {categoryBadge && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${categoryBadge.color}`}>
+                        {categoryBadge.label}
+                      </span>
+                    )}
+                    {model.pricing && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${priceColor}`}>
+                        ${model.pricing.input}/1M in
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-500">{model.provider}</p>
                   <div className="text-xs mt-2">
@@ -323,7 +451,7 @@ const ModelFinderClient = () => {
         })}
       </div>
 
-      {filteredModels.length === 0 && (
+      {filtered.length === 0 && (
         <div className="text-center text-gray-500 mt-8">No models match your filters.</div>
       )}
     </div>
