@@ -1,116 +1,130 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Input from "@/shared/components/Input";
-import Badge from "@/shared/components/Badge";
-import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-import { Check, Copy } from "lucide-react";
 
-export default function ModelFinderClient() {
+const ModelFinderClient = () => {
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [providers, setProviders] = useState([]);
-  const [selectedProvider, setSelectedProvider] = useState("");
-  const { isCopied, copyToClipboard } = useCopyToClipboard();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [providerFilter, setProviderFilter] = useState("");
+  const [capabilityFilter, setCapabilityFilter] = useState("");
 
   useEffect(() => {
-    async function fetchModels() {
+    const fetchModels = async () => {
       try {
         const response = await fetch("/api/models");
+        if (!response.ok) {
+          throw new Error("Failed to fetch models");
+        }
         const data = await response.json();
-        setModels(data.data);
-        setFilteredModels(data.data);
-        const uniqueProviders = [...new Set(data.data.map((model) => model.provider_name))];
-        setProviders(uniqueProviders);
-      } catch (error) {
-        console.error("Failed to fetch models:", error);
+        setModels(data.models);
+        setFilteredModels(data.models);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
+
     fetchModels();
   }, []);
 
   useEffect(() => {
-    let currentModels = models;
+    let filtered = models;
 
-    if (selectedProvider) {
-      currentModels = currentModels.filter(
-        (model) => model.provider_name === selectedProvider
-      );
+    if (providerFilter) {
+      filtered = filtered.filter((m) => m.provider === providerFilter);
     }
 
-    if (searchTerm) {
-      currentModels = currentModels.filter((model) =>
-        model.model_name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+    if (capabilityFilter) {
+      filtered = filtered.filter((m) => m.caps[capabilityFilter]);
     }
 
-    setFilteredModels(currentModels);
-  }, [searchTerm, selectedProvider, models]);
+    setFilteredModels(filtered);
+  }, [providerFilter, capabilityFilter, models]);
 
-  const handleCopy = (text) => {
-    copyToClipboard(text);
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    // Add a toast notification here in a real app
+    alert(`Copied: ${text}`);
   };
 
+  if (loading) return <div>Loading models...</div>;
+  if (error === "Failed to fetch models") {
+    return (
+      <div className="p-4">
+        <h1 className="text-2xl font-bold mb-4">Model Finder</h1>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-yellow-800">Authentication required. Please log in to view models.</p>
+          <a href="/login" className="text-blue-600 hover:underline mt-2 inline-block">Go to Login</a>
+        </div>
+      </div>
+    );
+  }
+  if (error) return <div>Error: {error}</div>;
+
+  const providers = [...new Set(models.map((m) => m.provider))];
+
   return (
-    <div className="p-4 md:p-6">
+    <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Model Finder</h1>
-      <div className="flex gap-4 mb-4">
-        <Input
-          placeholder="Search models..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="max-w-sm"
-        />
+
+      <div className="flex gap-4 mb-6">
         <select
-          value={selectedProvider}
-          onChange={(e) => setSelectedProvider(e.target.value)}
-          className="border rounded-md px-2 py-1"
+          value={providerFilter}
+          onChange={(e) => setProviderFilter(e.target.value)}
+          className="p-2 border rounded"
         >
           <option value="">All Providers</option>
-          {providers.map((provider) => (
-            <option key={provider} value={provider}>
-              {provider}
+          {providers.map((p) => (
+            <option key={p} value={p}>
+              {p}
             </option>
           ))}
         </select>
+
+        <select
+          value={capabilityFilter}
+          onChange={(e) => setCapabilityFilter(e.target.value)}
+          className="p-2 border rounded"
+        >
+          <option value="">All Capabilities</option>
+          <option value="vision">Vision</option>
+          <option value="search">Search</option>
+          <option value="reasoning">Reasoning</option>
+        </select>
       </div>
-      <div className="border rounded-lg overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model Name</th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider</th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Capabilities</th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model ID</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredModels.map((model) => (
-              <tr key={model.id}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{model.model_name}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.provider_name}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <div className="flex gap-1">
-                    {model.capabilities?.vision && <Badge variant="outline">Vision</Badge>}
-                    {model.capabilities?.json && <Badge variant="outline">JSON</Badge>}
-                    {model.capabilities?.tools && <Badge variant="outline">Tools</Badge>}
-                    {model.capabilities?.image && <Badge variant="outline">Image</Badge>}
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <div className="flex items-center gap-2">
-                    <span>{model.id}</span>
-                    <button onClick={() => handleCopy(model.id)} className="p-1">
-                      {isCopied ? <Check size={16} /> : <Copy size={16} />}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filteredModels.map((model) => (
+          <div
+            key={model.fullModel}
+            className="border p-4 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer"
+            onClick={() => copyToClipboard(`model: "${model.routedModel}"`)}
+          >
+            <h2 className="font-bold text-lg">{model.name}</h2>
+            <p className="text-sm text-gray-500">{model.provider}</p>
+            <div className="text-xs mt-2">
+              <p>Context: {model.caps.contextWindow}</p>
+              <p>Max Output: {model.caps.maxOutput}</p>
+            </div>
+            {model.pricing && (
+              <div className="text-xs mt-2">
+                <p>Input: ${model.pricing.input}/1M tokens</p>
+                <p>Output: ${model.pricing.output}/1M tokens</p>
+              </div>
+            )}
+            <div className="flex gap-2 mt-2">
+              {model.caps.vision && <span className="bg-blue-200 px-2 py-1 rounded-full text-xs">Vision</span>}
+              {model.caps.search && <span className="bg-green-200 px-2 py-1 rounded-full text-xs">Search</span>}
+              {model.caps.reasoning && <span className="bg-purple-200 px-2 py-1 rounded-full text-xs">Reasoning</span>}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
-}
+};
+
+export default ModelFinderClient;

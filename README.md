@@ -696,6 +696,17 @@ Seamless translation between formats:
 
 ## 💰 Pricing at a Glance
 
+---
+
+## 🗺️ UI Roadmap
+
+### Dashboard Features
+- [ ] **Model Finder**: Discover and compare AI models across providers.
+- [ ] **Provider Health Matrix**: Real-time status and performance of all connected providers.
+- [ ] **Token Saver Preview**: Visualize token savings with RTK and Headroom.
+- [ ] **Provider Onboarding Wizard**: Guided setup for new AI providers.
+- [ ] **Route Simulator**: Test and optimize routing logic for combos.
+
 | Tier                | Provider              | Cost         | Quota Reset      | Best For                                |
 | ------------------- | --------------------- | ------------ | ---------------- | --------------------------------------- |
 | **🚀 TOKEN SAVER**  | **RTK (built-in)**    | **FREE**     | Always on        | **Save 20-40% tokens on EVERY request** |

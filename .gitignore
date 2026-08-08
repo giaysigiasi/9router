@@ -1,4 +1,4 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+﻿# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
 /node_modules
@@ -50,6 +50,8 @@ logs/*
 source/*
 .cursor/*
 docs/*
+!docs/AI_BOOK.md
+!docs/NEW_FEATURES.md
 !docs/ARCHITECTURE.md
 test/*
 open-sse/test/*
