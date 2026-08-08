@@ -66,6 +66,9 @@ export default function TokenSaverClient() {
   const [locale, setLocale] = useState("en");
   const [previewConfig, setPreviewConfig] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [tokensPerMonth, setTokensPerMonth] = useState(100);
+  const [compressionRate, setCompressionRate] = useState(0.7);
+  const [pricePerMillion, setPricePerMillion] = useState(3);
 
   const { copied, copy } = useCopyToClipboard();
 
@@ -406,6 +409,37 @@ export default function TokenSaverClient() {
   const handlePxpipeEnabled = (value) => {
     setPxpipeEnabled(value);
     patchSetting({ pxpipeEnabled: value });
+  };
+
+  const exportYaml = () => {
+    return `rtk:
+  enabled: ${rtkEnabled}
+headroom:
+  enabled: ${headroomEnabled}
+  url: ${headroomUrl}
+caveman:
+  enabled: ${cavemanEnabled}
+  level: ${cavemanLevel}
+ponytail:
+  enabled: ${ponytailEnabled}
+  level: ${ponytailLevel}`;
+  };
+
+  const exportToml = () => {
+    return `[rtk]
+enabled = ${rtkEnabled}
+
+[headroom]
+enabled = ${headroomEnabled}
+url = "${headroomUrl}"
+
+[caveman]
+enabled = ${cavemanEnabled}
+level = "${cavemanLevel}"
+
+[ponytail]
+enabled = ${ponytailEnabled}
+level = "${ponytailLevel}"`;
   };
 
   const handlePxpipeMinCharsBlur = () => {
@@ -819,6 +853,70 @@ export default function TokenSaverClient() {
               </Button>
             </div>
           )}
+        </div>
+        <div className="pt-4 mt-4 border-t border-border">
+          <h3 className="text-lg font-semibold mb-3">Cost Estimator</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Tokens/month (M)</label>
+              <input
+                type="number"
+                value={tokensPerMonth}
+                onChange={(e) => setTokensPerMonth(Number(e.target.value) || 0)}
+                className="w-full p-2 border rounded"
+                placeholder="e.g. 100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Compression rate</label>
+              <input
+                type="number"
+                value={compressionRate}
+                onChange={(e) => setCompressionRate(Number(e.target.value) || 0)}
+                className="w-full p-2 border rounded"
+                placeholder="e.g. 0.7"
+                step="0.1"
+                min="0"
+                max="1"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Price per 1M tokens ($)</label>
+              <input
+                type="number"
+                value={pricePerMillion}
+                onChange={(e) => setPricePerMillion(Number(e.target.value) || 0)}
+                className="w-full p-2 border rounded"
+                placeholder="e.g. 3"
+                step="0.1"
+                min="0"
+              />
+            </div>
+          </div>
+          <div className="bg-surface-2 rounded p-4 mb-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-text-muted">Estimated monthly savings</p>
+                <p className="text-2xl font-bold text-success">
+                  ${(tokensPerMonth * compressionRate * pricePerMillion).toFixed(2)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-text-muted">Annual savings</p>
+                <p className="text-xl font-semibold">
+                  ${(tokensPerMonth * compressionRate * pricePerMillion * 12).toFixed(2)}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => copy(exportYaml())}>
+              {copied ? "Copied!" : "Export YAML"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => copy(exportToml())}>
+              {copied ? "Copied!" : "Export TOML"}
+            </Button>
+          </div>
         </div>
       </Card>
 
