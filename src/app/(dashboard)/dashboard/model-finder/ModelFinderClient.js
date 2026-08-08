@@ -36,6 +36,14 @@ const ModelFinderClient = () => {
   const [refreshInterval, setRefreshInterval] = useState(0);
   const [lastUpdated, setLastUpdated] = useState(null);
 
+  // New states for improvements
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedForCompare, setSelectedForCompare] = useState([]);
+  const [testResults, setTestResults] = useState({});
+  const [providerHealth, setProviderHealth] = useState({});
+  const [calcTokens, setCalcTokens] = useState(1000);
+  const [calcModel, setCalcModel] = useState("");
+
   const fetchModels = async () => {
     try {
       const response = await fetch("/api/models");
@@ -50,6 +58,21 @@ const ModelFinderClient = () => {
     }
   };
 
+  const fetchProviderHealth = async () => {
+    try {
+      const response = await fetch("/api/providers/health");
+      if (!response.ok) return;
+      const data = await response.json();
+      const healthMap = {};
+      (data.data || []).forEach((p) => {
+        healthMap[p.name] = p;
+      });
+      setProviderHealth(healthMap);
+    } catch (err) {
+      console.error("Failed to fetch provider health:", err);
+    }
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const savedGroup = localStorage.getItem("model-group");
@@ -57,6 +80,7 @@ const ModelFinderClient = () => {
     const savedRefresh = localStorage.getItem("model-refresh");
     if (savedRefresh) setRefreshInterval(parseInt(savedRefresh, 10));
     fetchModels();
+    fetchProviderHealth();
   }, []);
 
   useEffect(() => {
@@ -74,7 +98,10 @@ const ModelFinderClient = () => {
 
   useEffect(() => {
     if (refreshInterval <= 0) return;
-    const id = setInterval(fetchModels, refreshInterval);
+    const id = setInterval(() => {
+      fetchModels();
+      fetchProviderHealth();
+    }, refreshInterval);
     return () => clearInterval(id);
   }, [refreshInterval]);
 
@@ -186,6 +213,49 @@ const ModelFinderClient = () => {
     });
   };
 
+  const testModel = async (model) => {
+    setTestResults((prev) => ({
+      ...prev,
+      [model.fullModel]: { loading: true },
+    }));
+
+    try {
+      const response = await fetch("/api/models/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: model.fullModel, messages: [{ role: "user", content: "ping" }] }),
+      });
+
+      const data = await response.json();
+      setTestResults((prev) => ({
+        ...prev,
+        [model.fullModel]: {
+          loading: false,
+          ...data,
+        },
+      }));
+    } catch (err) {
+      setTestResults((prev) => ({
+        ...prev,
+        [model.fullModel]: {
+          loading: false,
+          success: false,
+          error: err.message,
+        },
+      }));
+    }
+  };
+
+  const toggleCompare = (model) => {
+    setSelectedForCompare((prev) => {
+      if (prev.find((m) => m.fullModel === model.fullModel)) {
+        return prev.filter((m) => m.fullModel !== model.fullModel);
+      }
+      if (prev.length >= 4) return prev;
+      return [...prev, model];
+    });
+  };
+
   const bulkDisable = async () => {
     setBulkActionLoading(true);
     try {
@@ -248,6 +318,28 @@ const ModelFinderClient = () => {
     return "bg-red-100 text-red-800";
   };
 
+  const getHealthDot = (providerName) => {
+    const health = providerHealth[providerName];
+    if (!health) return { color: "bg-gray-400", label: "Unknown" };
+    if (health.status === "healthy" || health.status === "ok")
+      return { color: "bg-green-500", label: `Healthy (${health.latency}ms)` };
+    if (health.status === "degraded")
+      return { color: "bg-yellow-500", label: `Degraded (${health.latency}ms)` };
+    return { color: "bg-red-500", label: "Down" };
+  };
+
+  const calculateCost = () => {
+    const model = models.find((m) => m.fullModel === calcModel);
+    if (!model || !model.pricing) return null;
+    const inputCost = (calcTokens / 1000000) * model.pricing.input;
+    const outputCost = (calcTokens / 1000000) * model.pricing.output;
+    return {
+      input: inputCost.toFixed(4),
+      output: outputCost.toFixed(4),
+      total: (inputCost + outputCost).toFixed(4),
+    };
+  };
+
   if (loading) return <div>Loading models...</div>;
   if (error === "Failed to fetch models") {
     return (
@@ -255,7 +347,9 @@ const ModelFinderClient = () => {
         <h1 className="text-2xl font-bold mb-4">Model Finder</h1>
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-yellow-800">Authentication required. Please log in to view models.</p>
-          <a href="/login" className="text-blue-600 hover:underline mt-2 inline-block">Go to Login</a>
+          <a href="/login" className="text-blue-600 hover:underline mt-2 inline-block">
+            Go to Login
+          </a>
         </div>
       </div>
     );
@@ -263,10 +357,43 @@ const ModelFinderClient = () => {
   if (error) return <div>Error: {error}</div>;
 
   const providers = [...new Set(models.map((m) => m.provider))];
+  const cost = calculateCost();
 
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Model Finder</h1>
+
+      {/* Cost Calculator */}
+      <div className="mb-4 p-3 border rounded-lg bg-gray-50">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium">Cost Calculator:</span>
+          <input
+            type="number"
+            placeholder="Tokens"
+            value={calcTokens}
+            onChange={(e) => setCalcTokens(Number(e.target.value))}
+            className="p-2 border rounded text-sm w-32"
+            min="0"
+          />
+          <select
+            value={calcModel}
+            onChange={(e) => setCalcModel(e.target.value)}
+            className="p-2 border rounded text-sm"
+          >
+            <option value="">Select model...</option>
+            {filtered.slice(0, 50).map((m) => (
+              <option key={m.fullModel} value={m.fullModel}>
+                {m.name} ({m.provider})
+              </option>
+            ))}
+          </select>
+          {cost && (
+            <span className="text-sm text-gray-700">
+              In: ${cost.input} | Out: ${cost.output} | <strong>Total: ${cost.total}</strong>
+            </span>
+          )}
+        </div>
+      </div>
 
       <div className="flex gap-4 mb-4 flex-wrap items-center">
         <input
@@ -349,15 +476,45 @@ const ModelFinderClient = () => {
             ))}
           </select>
           <button
-            onClick={fetchModels}
+            onClick={() => {
+              fetchModels();
+              fetchProviderHealth();
+            }}
             className="px-3 py-2 border rounded text-sm hover:bg-gray-50 font-medium"
           >
             ↻
           </button>
-          {lastUpdated && (
-            <span className="text-xs text-gray-500 px-1">{formatLastUpdated()}</span>
-          )}
+          {lastUpdated && <span className="text-xs text-gray-500 px-1">{formatLastUpdated()}</span>}
         </div>
+      </div>
+
+      {/* Compare Mode Toggle */}
+      <div className="mb-4 flex items-center gap-2">
+        <button
+          onClick={() => {
+            setCompareMode(!compareMode);
+            if (compareMode) setSelectedForCompare([]);
+          }}
+          className={`px-4 py-2 rounded text-sm font-medium ${
+            compareMode ? "bg-purple-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+          }`}
+        >
+          {compareMode ? "Exit Compare Mode" : "Compare Models"}
+        </button>
+        {compareMode && selectedForCompare.length >= 2 && (
+          <button
+            onClick={() => {
+              const modal = document.getElementById("compare-modal");
+              if (modal) modal.showModal();
+            }}
+            className="px-4 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
+          >
+            Compare ({selectedForCompare.length})
+          </button>
+        )}
+        {compareMode && (
+          <span className="text-xs text-gray-600">Select up to 4 models to compare</span>
+        )}
       </div>
 
       {selectedModels.length > 0 && (
@@ -391,13 +548,17 @@ const ModelFinderClient = () => {
           const isFav = favorites.includes(model.fullModel);
           const categoryBadge = getCategoryBadge(model.provider);
           const priceColor = getPriceColor(model.pricing?.input);
+          const health = getHealthDot(model.provider);
+          const testResult = testResults[model.fullModel];
+          const isComparing = selectedForCompare.find((m) => m.fullModel === model.fullModel);
+
           return (
             <div
               key={model.fullModel}
               className={`border p-4 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer relative ${
                 isSelected ? "ring-2 ring-blue-500" : ""
               }`}
-              onClick={() => copyToClipboard(`model: "${model.routedModel}"`)}
+              onClick={() => !compareMode && copyToClipboard(`model: "${model.routedModel}"`)}
             >
               <div className="flex items-start gap-2">
                 <input
@@ -427,6 +588,11 @@ const ModelFinderClient = () => {
                         ${model.pricing.input}/1M in
                       </span>
                     )}
+                    {/* Provider Health Dot */}
+                    <span
+                      className={`inline-block w-2 h-2 rounded-full ${health.color}`}
+                      title={health.label}
+                    ></span>
                   </div>
                   <p className="text-sm text-gray-500">{model.provider}</p>
                   <div className="text-xs mt-2">
@@ -444,6 +610,40 @@ const ModelFinderClient = () => {
                     {model.caps.search && <span className="bg-green-200 px-2 py-1 rounded-full text-xs">Search</span>}
                     {model.caps.reasoning && <span className="bg-purple-200 px-2 py-1 rounded-full text-xs">Reasoning</span>}
                   </div>
+
+                  {/* Quick Test Button */}
+                  <div className="mt-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        testModel(model);
+                      }}
+                      disabled={testResult?.loading}
+                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {testResult?.loading ? "Testing..." : "Quick Test"}
+                    </button>
+                    {testResult && !testResult.loading && (
+                      <span className={`ml-2 text-xs ${testResult.success ? "text-green-600" : "text-red-600"}`}>
+                        {testResult.success ? `✅ ${testResult.latency}ms` : `❌ ${testResult.error}`}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Compare Checkbox */}
+                  {compareMode && (
+                    <div className="mt-2">
+                      <label className="flex items-center gap-1 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={!!isComparing}
+                          onChange={() => toggleCompare(model)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        Compare
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -453,6 +653,103 @@ const ModelFinderClient = () => {
 
       {filtered.length === 0 && (
         <div className="text-center text-gray-500 mt-8">No models match your filters.</div>
+      )}
+
+      {/* Compare Modal */}
+      {compareMode && selectedForCompare.length >= 2 && (
+        <dialog id="compare-modal" className="p-0 rounded-lg shadow-2xl max-w-4xl w-full mx-auto">
+          <div className="p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-bold">Compare Models</h2>
+              <button
+                onClick={() => document.getElementById("compare-modal").close()}
+                className="text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-2">Feature</th>
+                    {selectedForCompare.map((m) => (
+                      <th key={m.fullModel} className="text-left p-2">
+                        {m.name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Provider</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.provider}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Context Window</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.caps.contextWindow?.toLocaleString() || "N/A"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Max Output</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.caps.maxOutput?.toLocaleString() || "N/A"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Input Price</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.pricing ? `$${m.pricing.input}/1M` : "N/A"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Output Price</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.pricing ? `$${m.pricing.output}/1M` : "N/A"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Vision</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.caps.vision ? "✅" : "❌"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-2 font-medium">Search</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.caps.search ? "✅" : "❌"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-medium">Reasoning</td>
+                    {selectedForCompare.map((m) => (
+                      <td key={m.fullModel} className="p-2">
+                        {m.caps.reasoning ? "✅" : "❌"}
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </dialog>
       )}
     </div>
   );
