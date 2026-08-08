@@ -43,6 +43,8 @@ const systemItems = [
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
 
+export { navItems, debugItems, systemItems };
+
 export default function Sidebar({ onClose }) {
   const pathname = usePathname();
   const [mediaOpen, setMediaOpen] = useState(false);

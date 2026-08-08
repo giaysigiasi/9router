@@ -13,6 +13,8 @@ const ModelFinderClient = () => {
   const [selectedModels, setSelectedModels] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [sortField, setSortField] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
 
   useEffect(() => {
     const fetchModels = async () => {
@@ -60,8 +62,48 @@ const ModelFinderClient = () => {
       filtered = filtered.filter((m) => m.caps[capabilityFilter]);
     }
 
+    filtered = [...filtered].sort((a, b) => {
+      let av, bv;
+      switch (sortField) {
+        case "provider":
+          av = a.provider;
+          bv = b.provider;
+          break;
+        case "contextWindow":
+          av = a.caps.contextWindow || 0;
+          bv = b.caps.contextWindow || 0;
+          break;
+        case "maxOutput":
+          av = a.caps.maxOutput || 0;
+          bv = b.caps.maxOutput || 0;
+          break;
+        case "inputPrice":
+          av = a.pricing?.input || 0;
+          bv = b.pricing?.input || 0;
+          break;
+        case "outputPrice":
+          av = a.pricing?.output || 0;
+          bv = b.pricing?.output || 0;
+          break;
+        case "fullModel":
+          av = a.fullModel;
+          bv = b.fullModel;
+          break;
+        case "name":
+        default:
+          av = a.name;
+          bv = b.name;
+          break;
+      }
+      if (typeof av === "string") av = av.toLowerCase();
+      if (typeof bv === "string") bv = bv.toLowerCase();
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
     setFilteredModels(filtered);
-  }, [searchQuery, providerFilter, capabilityFilter, models]);
+  }, [searchQuery, providerFilter, capabilityFilter, models, sortField, sortDir]);
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -148,7 +190,7 @@ const ModelFinderClient = () => {
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Model Finder</h1>
 
-      <div className="flex gap-4 mb-4 flex-wrap">
+      <div className="flex gap-4 mb-4 flex-wrap items-center">
         <input
           type="text"
           placeholder="Search models..."
@@ -179,6 +221,27 @@ const ModelFinderClient = () => {
           <option value="search">Search</option>
           <option value="reasoning">Reasoning</option>
         </select>
+
+        <select
+          value={sortField}
+          onChange={(e) => setSortField(e.target.value)}
+          className="p-2 border rounded"
+        >
+          <option value="name">Sort: Name</option>
+          <option value="provider">Sort: Provider</option>
+          <option value="contextWindow">Sort: Context Window</option>
+          <option value="maxOutput">Sort: Max Output</option>
+          <option value="inputPrice">Sort: Input Price</option>
+          <option value="outputPrice">Sort: Output Price</option>
+          <option value="fullModel">Sort: Full Model ID</option>
+        </select>
+
+        <button
+          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          className="px-3 py-2 border rounded text-sm hover:bg-gray-50"
+        >
+          {sortDir === "asc" ? "↑ Asc" : "↓ Desc"}
+        </button>
       </div>
 
       {selectedModels.length > 0 && (
