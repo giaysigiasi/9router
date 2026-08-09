@@ -85,13 +85,26 @@ export default function ProviderHealthClient() {
   const getStatusIcon = (status) => {
     if (status === "healthy") return <CheckCircle className="w-5 h-5 text-success" />;
     if (status === "degraded") return <AlertTriangle className="w-5 h-5 text-warning" />;
+    if (status === "no-key") return <AlertTriangle className="w-5 h-5 text-warning" />;
     return <XCircle className="w-5 h-5 text-error" />;
   };
 
   const getStatusColor = (status) => {
     if (status === "healthy") return "bg-success/15 text-success";
     if (status === "degraded") return "bg-warning/15 text-warning";
+    if (status === "no-key") return "bg-warning/15 text-warning";
     return "bg-error/15 text-error";
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case "healthy": return "Healthy";
+      case "degraded": return "Degraded";
+      case "no-key": return "No API Key";
+      case "auth-error": return "Auth Error";
+      case "unreachable": return "Unreachable";
+      default: return status || "Unknown";
+    }
   };
 
   const stats = useMemo(() => {
@@ -242,7 +255,7 @@ export default function ProviderHealthClient() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(provider.status)}`}>
                         {getStatusIcon(provider.status)}
-                        {provider.status}
+                        {getStatusLabel(provider.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-text">
@@ -295,7 +308,7 @@ export default function ProviderHealthClient() {
                   <span className="text-text-muted">Status:</span>
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedProvider.status)}`}>
                     {getStatusIcon(selectedProvider.status)}
-                    {selectedProvider.status}
+                    {getStatusLabel(selectedProvider.status)}
                   </span>
                 </div>
                 <div className="flex justify-between">

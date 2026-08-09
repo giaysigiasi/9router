@@ -16,7 +16,7 @@ API endpoint: `http://localhost:20128/v1`
 | 2 | Model Finder | `dashboard/providers/` | 1 | Planned |
 | 3 | Token Saver Preview | `dashboard/token-saver/` | 1 | In Progress |
 | 4 | Provider Onboarding Wizard lite | `dashboard/providers/new/` | 1 | Planned |
-| 5 | Provider Health Matrix | `dashboard/providers/` | 2 | Planned |
+| 5 | Provider Health Matrix | `dashboard/providers/` | 2 | Implemented |
 | 6 | Usage Heatmap | `dashboard/usage/` | 2 | Planned |
 | 7 | Cost + Quota Alerts lite | `dashboard/quota/`, `dashboard/usage/` | 2 | Planned |
 | 8 | Route Simulator | new route or `dashboard/combos/` | 3 | In Progress |
@@ -116,6 +116,12 @@ Guard checks changed, tracked files. New untracked files are checked after `git 
 - Replaced missing `Textarea` component with standard HTML textarea in `RouteSimulatorClient.js`.
 - Corrected `ConfirmModal` import path in `TokenSaverClient.js`.
 - These changes unblock further development on Wave 1 and Wave 3 UI features.
+
+### 2026-08-08 â€” Provider Health Matrix status mapping
+
+- Fixed `ProviderHealthClient.js` to map all backend statuses: `healthy`, `degraded`, `no-key`, `auth-error`, `unreachable`.
+- Added `getStatusLabel()` for user-friendly display: "No API Key", "Auth Error", "Unreachable".
+- Updated table rows and detail modal to use mapped labels instead of raw status strings.
 
 ## Scripts
 

@@ -43,6 +43,7 @@ const ModelFinderClient = () => {
   const [providerHealth, setProviderHealth] = useState({});
   const [calcTokens, setCalcTokens] = useState(1000);
   const [calcModel, setCalcModel] = useState("");
+  const [quickTestAllLoading, setQuickTestAllLoading] = useState(false);
 
   const fetchModels = async () => {
     try {
@@ -173,6 +174,21 @@ const ModelFinderClient = () => {
           av = a.fullModel;
           bv = b.fullModel;
           break;
+        case "health": {
+          const rank = (providerName) => {
+            const h = providerHealth[providerName];
+            if (!h) return 3;
+            if (h.status === "healthy" || h.status === "ok") return 0;
+            if (h.status === "degraded") return 1;
+            return 2;
+          };
+          const ar = rank(a.provider);
+          const br = rank(b.provider);
+          if (ar !== br) return sortDir === "asc" ? ar - br : br - ar;
+          av = a.name.toLowerCase();
+          bv = b.name.toLowerCase();
+          break;
+        }
         case "name":
         default:
           av = a.name;
@@ -293,6 +309,15 @@ const ModelFinderClient = () => {
   const bulkCopy = () => {
     const snippets = selectedModels.map((m) => `model: "${m}"`).join("\n");
     copyToClipboard(snippets);
+  };
+
+  const quickTestAll = async () => {
+    setQuickTestAllLoading(true);
+    try {
+      await Promise.all(filtered.map((m) => testModel(m)));
+    } finally {
+      setQuickTestAllLoading(false);
+    }
   };
 
   const formatLastUpdated = () => {
@@ -453,6 +478,7 @@ const ModelFinderClient = () => {
             <option value="inputPrice">Input Price</option>
             <option value="outputPrice">Output Price</option>
             <option value="fullModel">Full Model ID</option>
+            <option value="health">Health</option>
           </select>
           <button
             onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
@@ -483,6 +509,13 @@ const ModelFinderClient = () => {
             className="px-3 py-2 border rounded text-sm hover:bg-gray-50 font-medium"
           >
             ↻
+          </button>
+          <button
+            onClick={quickTestAll}
+            disabled={quickTestAllLoading || filtered.length === 0}
+            className="px-3 py-2 border rounded text-sm hover:bg-gray-50 font-medium disabled:opacity-50"
+          >
+            {quickTestAllLoading ? "Testing..." : "Quick Test All"}
           </button>
           {lastUpdated && <span className="text-xs text-gray-500 px-1">{formatLastUpdated()}</span>}
         </div>
