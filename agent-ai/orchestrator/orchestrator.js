@@ -48,6 +48,9 @@ function run(task, opts = {}) {
   const out = {};
   for (const agent of Object.keys(AGENT_COMBO)) {
     if (opts.dryRun) { out[agent] = { agent, combo: AGENT_COMBO[agent], dry: true }; continue; }
+    if (agent === 'codex' && out.claude) {
+      fs.appendFileSync(path.join(dir, 'codex-prompt.md'), '\n\nARCHITECT DESIGN:\n' + out.claude.stdout);
+    }
     out[agent] = runAgent(agent, path.join(dir, agent + '-prompt.md'), task.cwd || process.cwd());
   }
   fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(out, null, 2));
@@ -56,6 +59,14 @@ function run(task, opts = {}) {
 
 module.exports = { run, runAgent, writePrompts, AGENT_COMBO };
 if (require.main === module) {
-  const task = { repo: '9router', branch: 'feat/orchestrator', goal: process.argv[2] || 'pilot', cwd: process.cwd() };
-  console.log(JSON.stringify(run(task, { dryRun: true }), null, 2));
+  const args = process.argv.slice(2);
+  const get = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
+  const task = {
+    repo: get('--repo') || 'crazy-games-demo',
+    branch: get('--branch') || 'feat/orchestrator-pilot',
+    goal: get('--goal') || 'pilot',
+    cwd: get('--cwd') || process.cwd(),
+  };
+  const real = args.includes('--real');
+  console.log(JSON.stringify(run(task, real ? {} : { dryRun: true }), null, 2));
 }
