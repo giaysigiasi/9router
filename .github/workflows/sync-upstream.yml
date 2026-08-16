@@ -1,0 +1,36 @@
+name: Sync upstream main
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout david-dev
+        uses: actions/checkout@v4
+        with:
+          ref: david-dev
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: git fetch https://github.com/decolua/9router.git main
+
+      - name: Merge upstream when newer
+        run: |
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "david-dev already contains decolua/main"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-edit --no-ff FETCH_HEAD
+
+      - name: Push david-dev
+        run: git push origin HEAD:david-dev
