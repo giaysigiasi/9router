@@ -1,24 +1,19 @@
 import { NextResponse } from "next/server";
 import providers from "open-sse/providers/registry";
-import { getProviderConnections, getApiKeys } from "@/models";
+import { getProviderConnections } from "@/models";
 
 export async function GET() {
   const startTime = Date.now();
   
   try {
-    const [connections, apiKeys] = await Promise.all([
-      getProviderConnections(),
-      getApiKeys(),
-    ]);
-
-    const keyMap = new Map((apiKeys || []).map(k => [k.id, k]));
+    const connections = await getProviderConnections();
 
     const healthData = await Promise.all(
       providers.map(async (provider) => {
         const conn = connections.find(c => c.provider === provider.id && c.isActive);
-        const apiKey = conn?.apiKeyId ? keyMap.get(conn.apiKeyId) : null;
+        const apiKey = conn?.apiKey || conn?.accessToken;
         
-        if (!apiKey?.key) {
+        if (!apiKey) {
           return {
             id: provider.id,
             name: provider.name || provider.id,
@@ -31,7 +26,7 @@ export async function GET() {
 
         const probeStart = Date.now();
         try {
-          const ok = await probeProvider(provider.id, apiKey.key);
+          const ok = await probeProvider(provider.id, apiKey);
           const latency = Date.now() - probeStart;
           return {
             id: provider.id,
