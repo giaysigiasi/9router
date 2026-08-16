@@ -1,0 +1,23 @@
+{
+  "claude": {
+    "agent": "claude",
+    "combo": "1-reasoning",
+    "status": 0,
+    "stdout": "urn finalError;\n}\n```\n\n`executeTry` calls `handleChatCore` with the right `{provider, model, credentials}` for that try. Account selection from `auth.js` stays, but is invoked per-try instead of in a manual while-loop.\n\n**Key invariant preserved**: same retry semantics, same error responses, same logging.\n\n### `open-sse/handlers/chatCore.js` (minimal change)\n\nAdd optional `onOutcome` callback. After each `executor.execute()`:\n```js\nif (options.onOutcome) options.onOutcome({\n  provider, model, connectionId,\n  success: providerResponse.ok,\n  status: providerResponse.status\n});\n```\n\nNo other changes. chatCore stays focused on translation + streaming.\n\n## 5. What Stays Where\n\n| Concern | File |\n|---|---|\n| Format detection | `open-sse/services/provider.js` |\n| Translation | `open-sse/translator/index.js` |\n| Executor dispatch | `open-sse/executors/index.js` |\n| Token refresh | `open-sse/services/tokenRefresh.js` |\n| Credential selection | `src/sse/services/auth.js` |\n| Usage tracking | `src/lib/usageDb.js` |\n| RTK/Ponytail/Headroom/Pxpipe | unchanged — run inside chatCore before dispatch |\n| DB persistence | unchanged — orchestrator state is volatile in pilot |\n\n## 6. Migration Path (Pilot → Production)\n\nPilot is additive. No existing callers break.\n\n| Week | Action |\n|---|---|\n| 1 | Scaffold files. Implement `policy.buildPlan()` for single-model + fallback combo (no fusion yet). Wire into `chat.js` behind `settings.orchestratorEnabled` flag. |\n| 2 | Add circuit-breaker in `state.js`. Wire `recordOutcome()` from chatCore. |\n| 3 | Add fusion plan type. Add `/api/orchestrator/health` endpoint for dashboard. |\n| 4 | Remove feature flag. Delete old inline combo/rotation logic from `chat.js` and `combo.js`. |\n\n### Skipped (add later)\n- Persisting orchestrator state to DB/SQLite — add when GA and we need state across restarts\n- Cluster/multi-instance health sharing — add when deploying behind a process manager\n- OpenTelemetry traces — add when observability stack is in place\n",
+    "stderr": ""
+  },
+  "codex": {
+    "agent": "codex",
+    "combo": "1-coding-max",
+    "status": null,
+    "stdout": "",
+    "stderr": ""
+  },
+  "gemini": {
+    "agent": "gemini",
+    "combo": "2-reasoning",
+    "status": null,
+    "stdout": "",
+    "stderr": ""
+  }
+}

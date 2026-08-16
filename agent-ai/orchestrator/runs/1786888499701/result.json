@@ -1,0 +1,17 @@
+{
+  "claude": {
+    "agent": "claude",
+    "combo": "1-reasoning",
+    "dry": true
+  },
+  "codex": {
+    "agent": "codex",
+    "combo": "1-coding-max",
+    "dry": true
+  },
+  "gemini": {
+    "agent": "gemini",
+    "combo": "2-reasoning",
+    "dry": true
+  }
+}
