@@ -87,6 +87,49 @@ export function reorderByCapabilities(models, required) {
  */
 const comboRotationState = new Map();
 
+// Quota-blocked models per combo: model sinks to combo tail until cooldown expiry.
+// @type {Map<string, Map<string, number>>} comboName -> (model -> expiry ms)
+const comboQuotaBlocked = new Map();
+
+/**
+ * Move quota-blocked models (still within cooldown) to the tail of the combo,
+ * preserving relative order for unblocked models. Expired entries are evicted.
+ * @param {string[]} models - Array of model strings
+ * @param {string} comboName - Name of the combo
+ * @returns {string[]} Reordered models (blocked at tail)
+ */
+export function getQuotaJumpedModels(models, comboName) {
+  if (!models || models.length <= 1) return models;
+  const key = comboName || "__default__";
+  const now = Date.now();
+  const blocked = comboQuotaBlocked.get(key);
+  if (!blocked || blocked.size === 0) return models;
+
+  let dirty = false;
+  for (const [model, until] of blocked) {
+    if (until <= now) { blocked.delete(model); dirty = true; }
+  }
+  if (dirty && blocked.size === 0) comboQuotaBlocked.delete(key);
+
+  if (blocked.size === 0) return models;
+
+  const activeBlocked = new Set(blocked.keys());
+  const front = models.filter((m) => !activeBlocked.has(m));
+  const tail = models.filter((m) => activeBlocked.has(m));
+  return tail.length === 0 ? models : [...front, ...tail];
+}
+
+/**
+ * Mark a model as quota-blocked for a combo until `now + cooldownMs`.
+ */
+export function markComboModelQuotaBlocked(comboName, model, cooldownMs) {
+  if (!model) return;
+  const key = comboName || "__default__";
+  let blocked = comboQuotaBlocked.get(key);
+  if (!blocked) { blocked = new Map(); comboQuotaBlocked.set(key, blocked); }
+  blocked.set(model, Date.now() + cooldownMs);
+}
+
 // Trailing run of items after the last assistant/model turn = the current user
 // turn. It may span several messages (e.g. text + image split across blocks),
 // so we return all of them. History media (older turns) must not pin the combo
@@ -241,8 +284,13 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
  * @param {string} [comboName] - Combo name to reset; omit to clear all
  */
 export function resetComboRotation(comboName) {
-  if (comboName) comboRotationState.delete(comboName);
-  else comboRotationState.clear();
+  if (comboName) {
+    comboRotationState.delete(comboName);
+    comboQuotaBlocked.delete(comboName);
+  } else {
+    comboRotationState.clear();
+    comboQuotaBlocked.clear();
+  }
 }
 
 /**
@@ -292,7 +340,15 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       rotatedModels = reordered;
     }
   }
-  
+
+  // Quota-jump: sink quota-blocked models to the tail so requests start from
+  // working models and don't retry a quota-hit model until its cooldown ends.
+  const jumpedModels = getQuotaJumpedModels(rotatedModels, comboName);
+  if (jumpedModels !== rotatedModels) {
+    log.info("COMBO", `quota-jump reorder for "${comboName}": [${jumpedModels.join(", ")}]`);
+  }
+  rotatedModels = jumpedModels;
+
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
@@ -332,11 +388,23 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       }
 
       // Check if should fallback to next model
-      const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
+      const { shouldFallback, cooldownMs, reason } = checkFallbackError(result.status, errorText);
 
       if (!shouldFallback) {
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
         return result;
+      }
+
+      // Quota hit: block this model for the combo's cooldown and jump straight to
+      // the last model, skipping the middle ones for this request. If already on
+      // the last model, no jump — fall through to normal fail handling.
+      if (reason === "quota" && i < rotatedModels.length - 1) {
+        markComboModelQuotaBlocked(comboName, modelStr, cooldownMs);
+        log.warn("COMBO", `Model ${modelStr} quota-limited, blocking ${cooldownMs}ms and jumping to last model`);
+        lastError = errorText || String(result.status);
+        if (!lastStatus) lastStatus = result.status;
+        i = rotatedModels.length - 2; // loop i++ lands on the final (last) model
+        continue;
       }
 
       // For transient errors (503/502/504), wait for cooldown before falling through

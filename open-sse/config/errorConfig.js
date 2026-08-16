@@ -61,18 +61,18 @@ export const ERROR_RULES = [
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
   { text: "request not allowed",      cooldownMs: COOLDOWN.short },
   { text: "improperly formed request", cooldownMs: COOLDOWN.long },
-  { text: "rate limit",               backoff: true },
-  { text: "too many requests",        backoff: true },
-  { text: "quota exceeded",           backoff: true },
-  { text: "capacity",                 backoff: true },
-  { text: "overloaded",               backoff: true },
+  { text: "rate limit",               backoff: true, quota: true },
+  { text: "too many requests",        backoff: true, quota: true },
+  { text: "quota exceeded",           backoff: true, quota: true },
+  { text: "capacity",                 backoff: true, quota: true },
+  { text: "overloaded",               backoff: true, quota: true },
 
   // --- Status-based rules (fallback when text doesn't match) ---
   { status: 401, cooldownMs: COOLDOWN.long },
   { status: 402, cooldownMs: COOLDOWN.long },
   { status: 403, cooldownMs: COOLDOWN.long },
   { status: 404, cooldownMs: COOLDOWN.long },
-  { status: 429, backoff: true },
+  { status: 429, backoff: true, quota: true },
 ];
 
 // Backward compat: COOLDOWN_MS object (used by index.js re-export)
