@@ -2,16 +2,21 @@ import { NextResponse } from "next/server";
 import { getCombos, getProviderConnections, getProviderNodes } from "@/lib/localDb";
 import { getCombosHealth } from "@/lib/comboHealth";
 import { pingModelByKind } from "@/app/api/models/test/ping";
+import { makeKv } from "@/lib/db/helpers/kvStore";
 import registryProviders from "open-sse/providers/registry";
 
 export const dynamic = "force-dynamic";
 
+const probesKv = makeKv("comboHealth");
+const PROBE_STALE_MS = 5 * 60 * 1000; // 5 minutes
+
 export async function GET() {
   try {
-    const [combos, connections, nodes] = await Promise.all([
+    const [combos, connections, nodes, cachedProbes] = await Promise.all([
       getCombos(),
       getProviderConnections(),
       getProviderNodes(),
+      probesKv.getAll().catch(() => ({})),
     ]);
     // Build prefix → canonical provider ID map for health resolution
     const providerNodeMap = {};
@@ -31,7 +36,17 @@ export async function GET() {
         }
       }
     }
-    return NextResponse.json({ health: getCombosHealth(combos, connections, providerNodeMap) });
+    const health = getCombosHealth(combos, connections, providerNodeMap);
+    // Attach cached probe data (with staleness flag)
+    const now = Date.now();
+    for (const h of health) {
+      const probe = cachedProbes[h.id];
+      if (probe) {
+        h.probe = probe;
+        h.probeStale = !probe.checkedAt || (now - new Date(probe.checkedAt).getTime()) > PROBE_STALE_MS;
+      }
+    }
+    return NextResponse.json({ health });
   } catch (error) {
     console.log("Error fetching combo health:", error);
     return NextResponse.json({ error: "Failed to fetch combo health" }, { status: 500 });
@@ -52,6 +67,10 @@ export async function POST() {
         checkedAt: new Date().toISOString(),
       };
     }));
+    // Cache probe results in KV for the GET endpoint
+    const probeMap = {};
+    for (const p of probes) probeMap[p.id] = p;
+    await probesKv.setMany(probeMap);
     return NextResponse.json({ probes });
   } catch (error) {
     console.log("Error probing combo health:", error);

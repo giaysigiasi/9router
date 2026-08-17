@@ -17,19 +17,48 @@ function resolveProviderForHealth(prefix, providerNodeMap) {
   return prefix;
 }
 
+/**
+ * Build a reverse map from resolved provider ID → all original prefixes that map to it.
+ * This allows health checks to match connections whose .provider field may be a
+ * custom provider-node UUID that got registered under a different prefix.
+ */
+function buildReverseNodeMap(providerNodeMap) {
+  const reverse = {};
+  if (!providerNodeMap) return reverse;
+  for (const [prefix, resolved] of Object.entries(providerNodeMap)) {
+    if (resolved !== prefix) {
+      if (!reverse[resolved]) reverse[resolved] = [];
+      reverse[resolved].push(prefix);
+    }
+  }
+  return reverse;
+}
+
 export function getComboHealth(combo, connections = [], providerNodeMap = null) {
   const models = Array.isArray(combo?.models) ? combo.models.filter(Boolean) : [];
   if (models.length === 0) {
     return { status: "no-models", readyModels: 0, totalModels: 0, unavailableModels: [] };
   }
 
+  // Build set of ready provider identifiers from active connections
   const readyProviders = new Set(
     connections.filter(connectionCanRoute).map((connection) => connection.provider)
   );
+  // Also build reverse: for each ready provider, find what prefixes it covers
+  const reverseMap = buildReverseNodeMap(providerNodeMap);
+  for (const provider of readyProviders) {
+    // If this provider maps from some prefix, that prefix is also "ready"
+    if (reverseMap[provider]) {
+      for (const prefix of reverseMap[provider]) {
+        readyProviders.add(prefix);
+      }
+    }
+  }
+
   const unavailableModels = models.filter((model) => {
     const prefix = providerIdFromModel(model);
     const resolved = resolveProviderForHealth(prefix, providerNodeMap);
-    return !readyProviders.has(resolved);
+    return !readyProviders.has(resolved) && !readyProviders.has(prefix);
   });
   const readyModels = models.length - unavailableModels.length;
 

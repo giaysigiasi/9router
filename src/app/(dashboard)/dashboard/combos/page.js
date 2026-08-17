@@ -111,6 +111,14 @@ export default function CombosPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to probe combos");
       setComboProbes(Object.fromEntries((data.probes || []).map((probe) => [probe.id, probe])));
+      // Re-fetch passive health to pick up cached probe data
+      try {
+        const healthRes = await fetch("/api/combos/health");
+        if (healthRes.ok) {
+          const healthData = await healthRes.json();
+          setComboHealth(Object.fromEntries((healthData.health || []).map((item) => [item.id, item])));
+        }
+      } catch (_) { /* ignore refresh errors */ }
     } catch (error) {
       alert(error.message);
     } finally {
@@ -348,6 +356,24 @@ export default function CombosPage() {
   );
 }
 
+function ProbeBadge({ probe, probeStale }) {
+  if (!probe) return null;
+  const stale = probeStale !== false;
+  const base = "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium";
+  if (probe.status === "healthy") {
+    return (
+      <span className={`${base} ${stale ? "bg-emerald-500/5 text-emerald-600/60 dark:text-emerald-400/60" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`} title={`Live check: ${probe.latencyMs}ms${stale ? " (stale)" : ""}`}>
+        {stale ? "⚡" : "✓"} {probe.latencyMs}ms{stale ? " ~" : ""}
+      </span>
+    );
+  }
+  return (
+    <span className={`${base} bg-red-500/10 text-red-600 dark:text-red-400`} title={`Live check failed: ${probe.error || "unavailable"}`}>
+      ✗ {probe.error ? probe.error.slice(0, 30) : "fail"}
+    </span>
+  );
+}
+
 function ComboHealthBadge({ health }) {
   if (!health) return null;
   const styles = {
@@ -378,11 +404,13 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe, onSetStrategy }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
+  // Use cached probe from health object (populated by API from KV cache)
+  const probe = health?.probe;
 
   return (
     <Card padding="sm" className="group">
@@ -392,13 +420,15 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
               <ComboHealthBadge health={health} />
+              <ProbeBadge probe={probe} probeStale={health?.probeStale} />
             </div>
               {probe && (
                 <p className={`mt-1 text-[11px] ${probe.status === "healthy" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-                  Live check {probe.status === "healthy" ? `passed in ${probe.latencyMs}ms` : `failed${probe.error ? `: ${probe.error}` : ""}`}
+                  Live check {probe.status === "healthy" ? `passed in ${probe.latencyMs}ms${health?.probeStale ? " (stale)" : ""}` : `failed${probe.error ? `: ${probe.error}` : ""}`}
+                  {probe.checkedAt && <span className="text-text-muted ml-1">· {new Date(probe.checkedAt).toLocaleTimeString()}</span>}
                 </p>
               )}
               <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
