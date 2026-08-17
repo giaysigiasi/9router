@@ -33,6 +33,19 @@ describe("combo health", () => {
     });
   });
 
+  it("resolves custom provider-node prefix via providerNodeMap", () => {
+    const connections = [
+      { provider: "vietapi-node-abc", isActive: true, apiKey: "key" },
+    ];
+    const providerNodeMap = { "vietapi-strong-coding": "vietapi-node-abc" };
+
+    expect(getComboHealth({ models: ["vietapi-strong-coding/deepseek-v3"] }, connections, providerNodeMap)).toMatchObject({
+      status: "healthy",
+      readyModels: 1,
+      totalModels: 1,
+    });
+  });
+
   it("preserves combo identity in aggregate health", () => {
     expect(getCombosHealth(
       [{ id: "combo-1", name: "primary", models: ["openai/gpt"] }],

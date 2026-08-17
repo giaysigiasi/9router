@@ -8,7 +8,16 @@ function connectionCanRoute(connection) {
   return connection?.isActive && Boolean(connection.apiKey || connection.accessToken);
 }
 
-export function getComboHealth(combo, connections = []) {
+/**
+ * Resolve a model prefix to the provider connection identifier.
+ * Checks providerNodeMap first (prefix → resolved node ID), then falls back to prefix itself.
+ */
+function resolveProviderForHealth(prefix, providerNodeMap) {
+  if (providerNodeMap && providerNodeMap[prefix]) return providerNodeMap[prefix];
+  return prefix;
+}
+
+export function getComboHealth(combo, connections = [], providerNodeMap = null) {
   const models = Array.isArray(combo?.models) ? combo.models.filter(Boolean) : [];
   if (models.length === 0) {
     return { status: "no-models", readyModels: 0, totalModels: 0, unavailableModels: [] };
@@ -17,7 +26,11 @@ export function getComboHealth(combo, connections = []) {
   const readyProviders = new Set(
     connections.filter(connectionCanRoute).map((connection) => connection.provider)
   );
-  const unavailableModels = models.filter((model) => !readyProviders.has(providerIdFromModel(model)));
+  const unavailableModels = models.filter((model) => {
+    const prefix = providerIdFromModel(model);
+    const resolved = resolveProviderForHealth(prefix, providerNodeMap);
+    return !readyProviders.has(resolved);
+  });
   const readyModels = models.length - unavailableModels.length;
 
   return {
@@ -28,10 +41,10 @@ export function getComboHealth(combo, connections = []) {
   };
 }
 
-export function getCombosHealth(combos, connections) {
+export function getCombosHealth(combos, connections, providerNodeMap = null) {
   return (Array.isArray(combos) ? combos : []).map((combo) => ({
     id: combo.id,
     name: combo.name,
-    ...getComboHealth(combo, connections),
+    ...getComboHealth(combo, connections, providerNodeMap),
   }));
 }
