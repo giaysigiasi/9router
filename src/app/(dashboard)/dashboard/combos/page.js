@@ -59,6 +59,8 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboHealth, setComboHealth] = useState({});
+  const [comboProbes, setComboProbes] = useState({});
+  const [probing, setProbing] = useState(false);
   const [sortMode, setSortMode] = useState("default");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
@@ -99,6 +101,20 @@ export default function CombosPage() {
       console.log("Error fetching data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProbeCombos = async () => {
+    setProbing(true);
+    try {
+      const res = await fetch("/api/combos/health", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to probe combos");
+      setComboProbes(Object.fromEntries((data.probes || []).map((probe) => [probe.id, probe])));
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setProbing(false);
     }
   };
 
@@ -234,9 +250,14 @@ export default function CombosPage() {
             <li><span className="font-medium text-text-main">Fusion</span> — queries all models in parallel, then a judge synthesizes one answer. Best quality, but costs the most: every request bills all panel models + the judge (N+1 calls)</li>
           </ul>
         </div>
-        <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto whitespace-nowrap">
-          Create Combo
-        </Button>
+        <div className="flex w-full gap-2 sm:w-auto">
+          <Button icon="health_and_safety" variant="ghost" onClick={handleProbeCombos} disabled={probing} className="flex-1 whitespace-nowrap sm:flex-none">
+            {probing ? "Checking..." : "Check Health"}
+          </Button>
+          <Button icon="add" onClick={() => setShowCreateModal(true)} className="flex-1 whitespace-nowrap sm:flex-none">
+            Create Combo
+          </Button>
+        </div>
       </div>
 
        {/* Combos List */}
@@ -276,8 +297,9 @@ export default function CombosPage() {
               onEdit={() => setEditingCombo(combo)}
               onDelete={() => handleDelete(combo.id)}
               strategy={comboStrategies[combo.name] || {}}
-              health={comboHealth[combo.id]}
-              onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
+               health={comboHealth[combo.id]}
+               probe={comboProbes[combo.id]}
+               onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
             />
           ))}
         </div>
@@ -356,7 +378,7 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, onSetStrategy }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
@@ -374,7 +396,12 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
               <ComboHealthBadge health={health} />
             </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+              {probe && (
+                <p className={`mt-1 text-[11px] ${probe.status === "healthy" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                  Live check {probe.status === "healthy" ? `passed in ${probe.latencyMs}ms` : `failed${probe.error ? `: ${probe.error}` : ""}`}
+                </p>
+              )}
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
               {combo.models.length === 0 ? (
                 <span className="text-xs text-text-muted italic">No models</span>
               ) : (
