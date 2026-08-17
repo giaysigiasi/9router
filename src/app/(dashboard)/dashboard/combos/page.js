@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -22,6 +22,13 @@ const CAPACITY_ADAPTER_CAPS = [
   { key: "audioInput", label: "Audio", icon: "graphic_eq", desc: "Audio input" },
 ];
 const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.5-free";
+const COMBO_SORT_OPTIONS = [
+  { value: "default", label: "Sort: Default" },
+  { value: "name", label: "Name A–Z" },
+  { value: "health", label: "Health: needs attention" },
+  { value: "models", label: "Model count: high to low" },
+];
+const HEALTH_SORT_RANK = { unavailable: 0, degraded: 1, "no-models": 2, healthy: 3 };
 const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [] };
 const EMPTY_CAPACITY_ADAPTER = {
   vision: { ...EMPTY_CAP_ENTRY },
@@ -52,6 +59,7 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboHealth, setComboHealth] = useState({});
+  const [sortMode, setSortMode] = useState("default");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -188,6 +196,21 @@ export default function CombosPage() {
     }
   };
 
+  const sortedCombos = useMemo(() => {
+    if (sortMode === "default") return combos;
+    return [...combos].sort((a, b) => {
+      if (sortMode === "health") {
+        const healthDiff = (HEALTH_SORT_RANK[comboHealth[a.id]?.status] ?? 4) - (HEALTH_SORT_RANK[comboHealth[b.id]?.status] ?? 4);
+        if (healthDiff) return healthDiff;
+      }
+      if (sortMode === "models") {
+        const modelDiff = (b.models?.length || 0) - (a.models?.length || 0);
+        if (modelDiff) return modelDiff;
+      }
+      return (a.name || "").localeCompare(b.name || "");
+    });
+  }, [combos, comboHealth, sortMode]);
+
   if (loading) {
     return (
       <div className="flex flex-col gap-6">
@@ -216,8 +239,8 @@ export default function CombosPage() {
         </Button>
       </div>
 
-      {/* Combos List */}
-      {combos.length === 0 ? (
+       {/* Combos List */}
+       {combos.length === 0 ? (
         <Card>
           <div className="text-center py-12">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
@@ -230,9 +253,19 @@ export default function CombosPage() {
             </Button>
           </div>
         </Card>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {combos.map((combo) => (
+       ) : (
+         <div className="flex flex-col gap-4">
+           <div className="flex justify-end">
+             <div className="w-full sm:w-[240px]">
+               <Select
+                 options={COMBO_SORT_OPTIONS}
+                 value={sortMode}
+                 onChange={(e) => setSortMode(e.target.value)}
+                 selectClassName="py-1.5 text-xs"
+               />
+             </div>
+           </div>
+           {sortedCombos.map((combo) => (
             <ComboCard
               key={combo.id}
               combo={combo}

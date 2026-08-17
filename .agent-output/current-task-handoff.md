@@ -25,10 +25,18 @@ Status rules:
   - Maps records by combo ID.
   - Renders health badge next to combo name.
 - Added `tests/unit/combo-health.test.js`.
+- Added client-only combo sorter in `src/app/(dashboard)/dashboard/combos/page.js`.
+  - Default preserves API order.
+  - Name sorts A–Z.
+  - Health orders unavailable, degraded, no-models, then healthy.
+  - Model count orders high to low.
+  - Name resolves sort ties.
 - Confirmed routability supports active API-key and OAuth-token connections.
 - Direct Node assert check passed for `no-models`, `unavailable`, `degraded`, `healthy`, and aggregate combo identity.
 
 ## Validation
+- `git diff --check` passed.
+- `npx eslint "src/app/(dashboard)/dashboard/combos/page.js"` still reports pre-existing file errors: `fetchData` declared after its `useEffect` caller, plus modal `setState` inside effect. No sorter-specific lint finding.
 - `npm --prefix tests test -- combo-health.test.js` cannot collect tests. Existing `cheapkey-provider.test.js` fails identically with `TypeError: Cannot read properties of undefined (reading 'config')` at `describe`, before test bodies run. Baseline test runner issue.
 - `npm run build` failed outside combo-health code: `EPERM: operation not permitted, readlink 'C:\Users\D30PC\AppData\Local\Temp\GPU-Z-v8.sys'`, then Next's `FlightClientEntryPlugin` threw while handling that filesystem error.
 
@@ -47,4 +55,4 @@ Status rules:
 - `GET /dashboard/combos` returns `200`, but static HTML cannot prove client-rendered badge. Authenticated browser smoke check remains optional.
 
 ## Next Single Action
-Open authenticated `http://192.168.1.33:20130/dashboard/combos`; confirm each combo has Health badge and inspect `/api/combos/health` through same dashboard session if needed.
+Open authenticated `http://192.168.1.33:20130/dashboard/combos`; confirm health badges and each sorter option reorder cards as labeled.
