@@ -46,6 +46,33 @@ describe("combo health", () => {
     });
   });
 
+  it("resolves built-in registry uiAlias prefix (e.g. cmc → commandcode)", () => {
+    const connections = [
+      { provider: "commandcode", isActive: true, apiKey: "key" },
+    ];
+    // Simulates what the health API builds from registryProviders
+    const providerNodeMap = { cmc: "commandcode", ocg: "opencode-go" };
+
+    expect(getComboHealth({ models: ["cmc/deepseek/deepseek-v4-pro"] }, connections, providerNodeMap)).toMatchObject({
+      status: "healthy",
+      readyModels: 1,
+      totalModels: 1,
+    });
+  });
+
+  it("resolves registry aliases prefix (e.g. ch → chutes)", () => {
+    const connections = [
+      { provider: "chutes", isActive: true, apiKey: "key" },
+    ];
+    const providerNodeMap = { ch: "chutes" };
+
+    expect(getComboHealth({ models: ["ch/deepseek-v3"] }, connections, providerNodeMap)).toMatchObject({
+      status: "healthy",
+      readyModels: 1,
+      totalModels: 1,
+    });
+  });
+
   it("preserves combo identity in aggregate health", () => {
     expect(getCombosHealth(
       [{ id: "combo-1", name: "primary", models: ["openai/gpt"] }],

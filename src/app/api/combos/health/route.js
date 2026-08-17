@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCombos, getProviderConnections, getProviderNodes } from "@/lib/localDb";
 import { getCombosHealth } from "@/lib/comboHealth";
 import { pingModelByKind } from "@/app/api/models/test/ping";
+import registryProviders from "open-sse/providers/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +13,23 @@ export async function GET() {
       getProviderConnections(),
       getProviderNodes(),
     ]);
-    // Build prefix → node ID map for health resolution
+    // Build prefix → canonical provider ID map for health resolution
     const providerNodeMap = {};
+    // 1) Custom DB provider-nodes: prefix → node ID
     for (const node of nodes || []) {
       if (node.prefix && node.id) providerNodeMap[node.prefix] = node.id;
+    }
+    // 2) Built-in registry providers: uiAlias/aliases → alias
+    for (const entry of registryProviders) {
+      if (!entry) continue;
+      const canonical = entry.alias || entry.id;
+      if (!canonical) continue;
+      if (entry.uiAlias) providerNodeMap[entry.uiAlias] = canonical;
+      if (Array.isArray(entry.aliases)) {
+        for (const a of entry.aliases) {
+          if (a) providerNodeMap[a] = canonical;
+        }
+      }
     }
     return NextResponse.json({ health: getCombosHealth(combos, connections, providerNodeMap) });
   } catch (error) {
