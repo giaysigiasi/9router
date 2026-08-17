@@ -1,24 +1,24 @@
 # Current Task Handoff
 
 ## Task
-Build multi-agent orchestrator per `agent-ai/9router-multi-agent-orchestrator.md` + `agent-ai/multi-agent-agentic-ai-coding-cli.md`. Pilot round 1 complete.
+Deploy commit `83065549f0a1501b0740f75ece76405cb547533b` to UAT server `192.168.1.33` via `ssh p106-platform`.
 
 ## Done
-- Orchestrator scaffold: `agent-ai/orchestrator/{config.js, orchestrator.js, probe-uat.cjs}`
-- Per-agent combo mapping: claude→1-reasoning, codex→1-coding-max, gemini→2-reasoning
-- Per-agent env fix: claude uses `ANTHROPIC_BASE_URL`+`ANTHROPIC_API_KEY`, codex `OPENAI_*`, gemini `GEMINI_API_KEY` (not `N9ROUTER_*`)
-- Real run `runs/1786888606467`: **claude success** (status 0) — streamed full orchestrator design through 9Router → `stepfun/step-3.7-flash`
-- Committed: `b2b72979` on branch `david-dev`
-
-## Findings
-- 9Router UAT `http://192.168.1.33:20130` + key `sk-a9199bb7b055a6d0-j03vej-95a27b54`: reachable. `/v1/models` 200, `/v1/messages` 200 SSE (both `Authorization: Bearer` and `x-api-key` work)
-- `codex` CLI hard-requires TTY → `spawnSync` no TTY → fails. Winpty absent. Fallback: run codex in interactive terminal manually, or skip
-- `gemini` CLI may not be installed or needs different flags — unverified (run cut short)
-
-## Next Single Action
-Test codex headless workaround: `codex exec` subcommand (newer) or `script -q -c`; else run codex manually in VS Code terminal. Then verify gemini CLI exists: `where gemini`.
+- Checkout detached HEAD at 83065549 (local docker daemon down, so remote build).
+- Tar source `9router-deploy-83065549.tar.gz` (excluded node_modules/.next/.git).
+- scp to `/opt/9router/` on UAT.
+- Remote: extract to tmp, copy to `/opt/9router/` (UAT `.env` preserved — dotfile glob skipped by `cp -r`).
+- Remote: `docker build -t 9router:local .` → image `e658a846901e5889701b9025398be1854bfb2bab83f08ed7627841e4ffe42913`.
+- Remote: `docker compose -f docker-compose.yml up -d --force-recreate` → `9router:local Up Less than a second`.
+- UAT verify:
+  - `GET /api/health` → `{"ok":true}`
+  - `GET /v1/models` → list combos (`free-coding-max`, `free-reasoning`, `plan-plus-max`, ...)
+- Cleanup: removed local + remote tar, restored `david-dev` branch, `git stash pop`.
 
 ## Refs
-- Docs: `agent-ai/9router-multi-agent-orchestrator.md`, `agent-ai/multi-agent-agentic-ai-coding-cli.md`
-- Orchestrator: `agent-ai/orchestrator/orchestrator.js`
-- Latest real run: `agent-ai/orchestrator/runs/1786888606467/result.json`
+- Commit: `83065549 quota-jump feature`
+- Remote path: `/opt/9router`
+- Compose project: `9router`
+- Container: `9router-source`
+- Runs: `agent-ai/orchestrator/runs/1786890385159/result.json`
+- Target repo: `D:\R&D lab\crazy-games-demo` (main) / `D:\R&D lab\crazy-games-demo-wt` (worktree)
