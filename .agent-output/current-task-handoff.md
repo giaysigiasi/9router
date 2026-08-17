@@ -1,36 +1,26 @@
-# Current Task Handoff
+# Combo Health - Registry Prefix Resolution Fix
 
-## Task
-Add health checks for all LLM combos on `/dashboard/combos`.
+## Status: DEPLOYED to UAT (192.168.1.33:20130)
 
-## Delivered
-- Passive health remains `GET /api/combos/health`.
-  - Uses configured models and active provider credentials.
-  - Statuses: `healthy`, `degraded`, `unavailable`, `no-models`.
-- Active health added: `POST /api/combos/health`.
-  - Reads all LLM combos.
-  - Sends one internal chat probe to each combo name.
-  - Router applies combo strategy/fallback.
-  - Returns per-combo `id`, `name`, `status`, `latencyMs`, `error`, `checkedAt`.
-- Dashboard `src/app/(dashboard)/dashboard/combos/page.js`.
-  - Added `Check Health` button.
-  - Shows pass latency or failure detail on each checked combo.
-  - Probe evidence stays client-side; no DB schema/persistence added.
+## Problem
+Built-in registry providers (e.g., `cmc` for `commandcode`, `ocg` for `opencode-go`) showed as "Unavailable" on the combos health page because:
+- Models use **`uiAlias`** as prefix: `cmc/deepseek/deepseek-v4-pro`
+- Connections store the canonical **`alias`**: `commandcode`
+- The health API only mapped DB provider-node prefixes, not built-in registry ones
 
-## Files Changed
-- `src/app/api/combos/health/route.js`
-- `src/app/(dashboard)/dashboard/combos/page.js`
+## Fix Applied (commit c65dd7d4)
+**`src/app/api/combos/health/route.js`**: Import `registryProviders` from `open-sse/providers/registry` and build a complete mapping:
+1. DB provider-nodes: `prefix → node ID`
+2. Registry entries: `uiAlias → alias` and `aliases[] → alias`
 
-## Verification
-- `npx eslint "src/app/api/combos/health/route.js"` passed.
-- `npm --prefix tests test -- combo-health` failed before test execution:
-  `TypeError: Cannot read properties of undefined (reading 'config')` at `tests/unit/combo-health.test.js:4`.
-- Combo page eslint reports existing errors:
-  - `fetchData` accessed before declaration, line 71.
-  - synchronous `setState` via `fetchModalData` effect, line 785.
-  These predate health UI change.
-- Rebuilt and replaced local Docker service with `docker compose up --build -d`.
-- `http://127.0.0.1:20130/api/combos/health` returns expected `401 Unauthorized` without dashboard auth. Build output registers `GET` and `POST /api/combos/health`.
+**`src/lib/comboHealth.js`**: No changes needed — `resolveProviderForHealth()` logic was correct.
+
+**`tests/unit/combo-health.test.js`**: Added 2 tests:
+- `cmc → commandcode` (uiAlias resolution)
+- `ch → chutes` (aliases resolution)
+
+## Verify
+Refresh http://192.168.1.33:20130/dashboard/combos and confirm combos like `commandcode-deepseek`, `commandcode-discount` now show correct health status.
 
 ## Next Single Action
-Sign in at `http://192.168.1.33:20130/dashboard/combos`, click `Check Health`, confirm every LLM combo gets pass/fail result plus latency/error evidence.
+User should verify the combos page shows healthy/degraded status instead of "Unavailable 0/N" for all combos with active connections.

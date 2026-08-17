@@ -706,6 +706,7 @@ Seamless translation between formats:
 - [ ] **Token Saver Preview**: Visualize token savings with RTK and Headroom.
 - [ ] **Provider Onboarding Wizard**: Guided setup for new AI providers.
 - [ ] **Route Simulator**: Test and optimize routing logic for combos.
+- [ ] **Combo Operations**: Search, readiness detail, duplication, guarded route tests, and traffic metrics. See [combo page roadmap](docs/combo-page-roadmap.md).
 
 | Tier                | Provider              | Cost         | Quota Reset      | Best For                                |
 | ------------------- | --------------------- | ------------ | ---------------- | --------------------------------------- |
