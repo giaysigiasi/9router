@@ -51,6 +51,7 @@ export default function CombosPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
+  const [comboHealth, setComboHealth] = useState({});
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -62,21 +63,24 @@ export default function CombosPage() {
 
   const fetchData = async () => {
     try {
-      const [combosRes, providersRes, settingsRes] = await Promise.all([
+      const [combosRes, providersRes, settingsRes, healthRes] = await Promise.all([
         fetch("/api/combos"),
         fetch("/api/providers"),
         fetch("/api/settings"),
+        fetch("/api/combos/health"),
       ]);
       const combosData = await combosRes.json();
       const providersData = await providersRes.json();
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
-      
+      const healthData = healthRes.ok ? await healthRes.json() : {};
+
       // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
       if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
       if (providersRes.ok) {
         setActiveProviders(providersData.connections || []);
       }
       setComboStrategies(settingsData.comboStrategies || {});
+      setComboHealth(Object.fromEntries((healthData.health || []).map((item) => [item.id, item])));
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -239,6 +243,7 @@ export default function CombosPage() {
               onEdit={() => setEditingCombo(combo)}
               onDelete={() => handleDelete(combo.id)}
               strategy={comboStrategies[combo.name] || {}}
+              health={comboHealth[combo.id]}
               onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
             />
           ))}
@@ -288,13 +293,37 @@ export default function CombosPage() {
   );
 }
 
+function ComboHealthBadge({ health }) {
+  if (!health) return null;
+  const styles = {
+    healthy: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    degraded: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    unavailable: "bg-red-500/10 text-red-600 dark:text-red-400",
+    "no-models": "bg-black/5 text-text-muted dark:bg-white/5",
+  };
+  const labels = {
+    healthy: "Healthy",
+    degraded: "Degraded",
+    unavailable: "Unavailable",
+    "no-models": "No models",
+  };
+  return (
+    <span
+      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${styles[health.status] || styles.unavailable}`}
+      title={`${health.readyModels}/${health.totalModels} configured models can route`}
+    >
+      {labels[health.status] || "Unavailable"} {health.totalModels ? `${health.readyModels}/${health.totalModels}` : ""}
+    </span>
+  );
+}
+
 const STRATEGY_OPTIONS = [
   { value: "fallback", label: "Fallback — try in order" },
   { value: "round-robin", label: "Round Robin — rotate" },
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
@@ -308,7 +337,10 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
           </div>
           <div className="min-w-0 flex-1">
-            <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
+            <div className="flex items-center gap-2">
+              <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
+              <ComboHealthBadge health={health} />
+            </div>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
               {combo.models.length === 0 ? (
                 <span className="text-xs text-text-muted italic">No models</span>

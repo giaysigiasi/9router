@@ -1,24 +1,50 @@
 # Current Task Handoff
 
 ## Task
-Deploy commit `83065549f0a1501b0740f75ece76405cb547533b` to UAT server `192.168.1.33` via `ssh p106-platform`.
+Add health status for every combo at `/dashboard/combos`.
 
-## Done
-- Checkout detached HEAD at 83065549 (local docker daemon down, so remote build).
-- Tar source `9router-deploy-83065549.tar.gz` (excluded node_modules/.next/.git).
-- scp to `/opt/9router/` on UAT.
-- Remote: extract to tmp, copy to `/opt/9router/` (UAT `.env` preserved — dotfile glob skipped by `cp -r`).
-- Remote: `docker build -t 9router:local .` → image `e658a846901e5889701b9025398be1854bfb2bab83f08ed7627841e4ffe42913`.
-- Remote: `docker compose -f docker-compose.yml up -d --force-recreate` → `9router:local Up Less than a second`.
-- UAT verify:
-  - `GET /api/health` → `{"ok":true}`
-  - `GET /v1/models` → list combos (`free-coding-max`, `free-reasoning`, `plan-plus-max`, ...)
-- Cleanup: removed local + remote tar, restored `david-dev` branch, `git stash pop`.
+## Strategy Selected
+Strategy 1: configuration health. Local aggregate. No provider probes, quota use, or cost.
 
-## Refs
-- Commit: `83065549 quota-jump feature`
-- Remote path: `/opt/9router`
-- Compose project: `9router`
-- Container: `9router-source`
-- Runs: `agent-ai/orchestrator/runs/1786890385159/result.json`
-- Target repo: `D:\R&D lab\crazy-games-demo` (main) / `D:\R&D lab\crazy-games-demo-wt` (worktree)
+Status rules:
+- `healthy`: every combo model has active routable provider connection.
+- `degraded`: some models routable.
+- `unavailable`: no models routable.
+- `no-models`: combo has zero models.
+
+## Completed
+- Added `src/lib/comboHealth.js`.
+  - `getComboHealth(combo, connections)`
+  - `getCombosHealth(combos, connections)`
+- Added `src/app/api/combos/health/route.js`.
+  - `GET /api/combos/health`
+  - Reads `getCombos()` and `getProviderConnections()` in parallel.
+  - Returns `{ health: [...] }`.
+- Updated `src/app/(dashboard)/dashboard/combos/page.js`.
+  - Fetches `/api/combos/health`.
+  - Maps records by combo ID.
+  - Renders health badge next to combo name.
+- Added `tests/unit/combo-health.test.js`.
+- Confirmed routability supports active API-key and OAuth-token connections.
+- Direct Node assert check passed for `no-models`, `unavailable`, `degraded`, `healthy`, and aggregate combo identity.
+
+## Validation
+- `npm --prefix tests test -- combo-health.test.js` cannot collect tests. Existing `cheapkey-provider.test.js` fails identically with `TypeError: Cannot read properties of undefined (reading 'config')` at `describe`, before test bodies run. Baseline test runner issue.
+- `npm run build` failed outside combo-health code: `EPERM: operation not permitted, readlink 'C:\Users\D30PC\AppData\Local\Temp\GPU-Z-v8.sys'`, then Next's `FlightClientEntryPlugin` threw while handling that filesystem error.
+
+## Modified Files
+- `src/lib/comboHealth.js` — new.
+- `src/app/api/combos/health/route.js` — new.
+- `src/app/(dashboard)/dashboard/combos/page.js` — modified.
+- `tests/unit/combo-health.test.js` — new.
+
+## Docker Validation
+- `docker compose build 9router` completed successfully. Image: `9router:local`.
+- `docker compose up -d 9router` recreated and started `9router-source`; port `20130` bound.
+- Container log: Next.js ready, SQLite DB opened without startup errors.
+- Compiled Docker bundle contains `/api/combos/health` route and dashboard combo chunk references `/api/combos/health`.
+- Unauthenticated `GET http://127.0.0.1:20130/api/combos/health` correctly returns `401`, because dashboard API routes require session or CLI auth.
+- `GET /dashboard/combos` returns `200`, but static HTML cannot prove client-rendered badge. Authenticated browser smoke check remains optional.
+
+## Next Single Action
+Open authenticated `http://192.168.1.33:20130/dashboard/combos`; confirm each combo has Health badge and inspect `/api/combos/health` through same dashboard session if needed.
