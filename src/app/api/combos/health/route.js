@@ -3,6 +3,7 @@ import { getCombos, getProviderConnections, getProviderNodes } from "@/lib/local
 import { getCombosHealth } from "@/lib/comboHealth";
 import { pingModelByKind } from "@/app/api/models/test/ping";
 import { makeKv } from "@/lib/db/helpers/kvStore";
+import { markComboModelQuotaBlocked } from "open-sse/services/combo.js";
 import registryProviders from "open-sse/providers/registry";
 
 export const dynamic = "force-dynamic";
@@ -53,11 +54,39 @@ export async function GET() {
   }
 }
 
+const DEGRADE_COOLDOWN_MS = 15 * 60 * 1000; // 15 min auto-push-to-tail
+
 export async function POST() {
   try {
     const combos = (await getCombos()).filter((combo) => !combo.kind || combo.kind === "llm");
     const probes = await Promise.all(combos.map(async (combo) => {
       const result = await pingModelByKind(combo.name, "chat");
+      const degraded = !result.ok;
+      // Auto-move-to-tail: mark individual models that are degraded
+      if (degraded && Array.isArray(combo.models)) {
+        // Probe each model individually to find which ones are degraded
+        const modelProbes = await Promise.all(combo.models.map(async (m) => {
+          try {
+            const r = await pingModelByKind(m, "chat");
+            return { model: m, ok: r.ok };
+          } catch { return { model: m, ok: false }; }
+        }));
+        for (const mp of modelProbes) {
+          if (!mp.ok) {
+            markComboModelQuotaBlocked(combo.name, mp.model, DEGRADE_COOLDOWN_MS);
+          }
+        }
+        return {
+          id: combo.id,
+          name: combo.name,
+          status: "degraded",
+          latencyMs: result.latencyMs,
+          error: result.error,
+          checkedAt: new Date().toISOString(),
+          modelProbes: modelProbes.map(mp => ({ model: mp.model, ok: mp.ok })),
+          autoPushedToTail: modelProbes.filter(mp => !mp.ok).map(mp => mp.model),
+        };
+      }
       return {
         id: combo.id,
         name: combo.name,

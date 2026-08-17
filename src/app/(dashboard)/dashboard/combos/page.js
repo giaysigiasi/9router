@@ -360,10 +360,18 @@ function ProbeBadge({ probe, probeStale }) {
   if (!probe) return null;
   const stale = probeStale !== false;
   const base = "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium";
+  const hasAutoPush = Array.isArray(probe.autoPushedToTail) && probe.autoPushedToTail.length > 0;
   if (probe.status === "healthy") {
     return (
       <span className={`${base} ${stale ? "bg-emerald-500/5 text-emerald-600/60 dark:text-emerald-400/60" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`} title={`Live check: ${probe.latencyMs}ms${stale ? " (stale)" : ""}`}>
         {stale ? "⚡" : "✓"} {probe.latencyMs}ms{stale ? " ~" : ""}
+      </span>
+    );
+  }
+  if (hasAutoPush) {
+    return (
+      <span className={`${base} bg-amber-500/10 text-amber-600 dark:text-amber-400`} title={`Auto-pushed to tail: ${probe.autoPushedToTail.join(", ")}`}>
+        ⬇ {probe.autoPushedToTail.length} moved to tail
       </span>
     );
   }
@@ -426,8 +434,8 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               <ProbeBadge probe={probe} probeStale={health?.probeStale} />
             </div>
               {probe && (
-                <p className={`mt-1 text-[11px] ${probe.status === "healthy" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-                  Live check {probe.status === "healthy" ? `passed in ${probe.latencyMs}ms${health?.probeStale ? " (stale)" : ""}` : `failed${probe.error ? `: ${probe.error}` : ""}`}
+                <p className={`mt-1 text-[11px] ${probe.status === "healthy" ? "text-emerald-600 dark:text-emerald-400" : probe.autoPushedToTail?.length ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
+                  Live check {probe.status === "healthy" ? `passed in ${probe.latencyMs}ms${health?.probeStale ? " (stale)" : ""}` : probe.autoPushedToTail?.length ? `${probe.autoPushedToTail.length} model(s) auto-pushed to tail: ${probe.autoPushedToTail.join(", ")}` : `failed${probe.error ? `: ${probe.error}` : ""}`}
                   {probe.checkedAt && <span className="text-text-muted ml-1">· {new Date(probe.checkedAt).toLocaleTimeString()}</span>}
                 </p>
               )}
