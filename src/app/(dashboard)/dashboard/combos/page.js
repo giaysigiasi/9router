@@ -59,6 +59,7 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboHealth, setComboHealth] = useState({});
+  const [lastPollAt, setLastPollAt] = useState(null);
   const [comboProbes, setComboProbes] = useState({});
   const [probing, setProbing] = useState(false);
   const [sortMode, setSortMode] = useState("default");
@@ -91,6 +92,7 @@ export default function CombosPage() {
       }
       setComboStrategies(settingsData.comboStrategies || {});
       setComboHealth(Object.fromEntries((healthData.health || []).map((item) => [item.id, item])));
+      setLastPollAt(healthData.lastPollAt || null);
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -116,7 +118,8 @@ export default function CombosPage() {
         const healthRes = await fetch("/api/combos/health");
         if (healthRes.ok) {
           const healthData = await healthRes.json();
-          setComboHealth(Object.fromEntries((healthData.health || []).map((item) => [item.id, item])));
+      setComboHealth(Object.fromEntries((healthData.health || []).map((item) => [item.id, item])));
+      setLastPollAt(healthData.lastPollAt || null);
         }
       } catch (_) { /* ignore refresh errors */ }
     } catch (error) {
@@ -259,9 +262,16 @@ export default function CombosPage() {
           </ul>
         </div>
         <div className="flex w-full gap-2 sm:w-auto">
-          <Button icon="health_and_safety" variant="ghost" onClick={handleProbeCombos} disabled={probing} className="flex-1 whitespace-nowrap sm:flex-none">
-            {probing ? "Checking..." : "Check Health"}
-          </Button>
+          <div className="flex items-center gap-2 flex-1 sm:flex-none">
+            <Button icon="health_and_safety" variant="ghost" onClick={handleProbeCombos} disabled={probing} className="whitespace-nowrap">
+              {probing ? "Checking..." : "Check Health"}
+            </Button>
+            {lastPollAt && (
+              <span className="text-[11px] text-text-muted whitespace-nowrap" title={`Auto-polled at ${new Date(lastPollAt).toLocaleString()}`}>
+                Last: {new Date(lastPollAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
           <Button icon="add" onClick={() => setShowCreateModal(true)} className="flex-1 whitespace-nowrap sm:flex-none">
             Create Combo
           </Button>

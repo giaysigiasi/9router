@@ -40,10 +40,19 @@ export function getComboHealth(combo, connections = [], providerNodeMap = null) 
     return { status: "no-models", readyModels: 0, totalModels: 0, unavailableModels: [] };
   }
 
-  // Build set of ready provider identifiers from active connections
-  const readyProviders = new Set(
-    connections.filter(connectionCanRoute).map((connection) => connection.provider)
-  );
+  // Build set of ready provider identifiers from active connections.
+  // Resolve each connection.provider through providerNodeMap so both the raw
+  // ID (e.g. "kilo-gateway") and its canonical alias (e.g. "kgw") are marked ready.
+  const readyProviders = new Set();
+  for (const conn of connections) {
+    if (!connectionCanRoute(conn)) continue;
+    const raw = conn.provider;
+    readyProviders.add(raw);
+    // Resolve to canonical if providerNodeMap has it
+    if (providerNodeMap && providerNodeMap[raw]) {
+      readyProviders.add(providerNodeMap[raw]);
+    }
+  }
   // Also build reverse: for each ready provider, find what prefixes it covers
   const reverseMap = buildReverseNodeMap(providerNodeMap);
   for (const provider of readyProviders) {
@@ -71,9 +80,11 @@ export function getComboHealth(combo, connections = [], providerNodeMap = null) 
 }
 
 export function getCombosHealth(combos, connections, providerNodeMap = null) {
-  return (Array.isArray(combos) ? combos : []).map((combo) => ({
-    id: combo.id,
-    name: combo.name,
-    ...getComboHealth(combo, connections, providerNodeMap),
-  }));
+  return (Array.isArray(combos) ? combos : [])
+    .filter(Boolean)
+    .map((combo) => ({
+      id: combo.id,
+      name: combo.name,
+      ...getComboHealth(combo, connections, providerNodeMap),
+    }));
 }

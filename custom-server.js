@@ -14,6 +14,7 @@ const PEER_TOKEN = crypto.randomBytes(24).toString("hex");
 process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
 
 let backgroundRefreshStarted = false;
+let backgroundComboHealthPollStarted = false;
 
 function startBackgroundTokenRefreshFromCustomServer() {
   if (backgroundRefreshStarted) return;
@@ -46,6 +47,22 @@ function startBackgroundTokenRefreshFromCustomServer() {
     });
 }
 
+function startBackgroundComboHealthPoll() {
+  if (backgroundComboHealthPollStarted) return;
+  backgroundComboHealthPollStarted = true;
+  const modPath = path.join(__dirname, "src", "lib", "backgroundComboHealthPoll.js");
+  import(pathToFileURL(modPath).href)
+    .then((m) => {
+      try { m.startBackgroundComboHealthPoll(); } catch (e) {
+        console.error("[ComboHealthPoll] start failed:", e && e.message ? e.message : e);
+      }
+      const stop = () => { try { m.stopBackgroundComboHealthPoll(); } catch {} };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    })
+    .catch(() => { /* expected in standalone builds */ });
+}
+
 // Wrap Next standalone HTTP server: derive client IP from the TCP socket
 // (unspoofable) and strip client-supplied forwarding headers so downstream
 // rate-limiting keys on the real peer address instead of attacker-controlled XFF.
@@ -75,6 +92,7 @@ http.createServer = (...args) => {
   const server = origCreate(...rest, wrapped);
   server.once("listening", () => {
     startBackgroundTokenRefreshFromCustomServer();
+    startBackgroundComboHealthPoll();
   });
   const origEmit = server.emit;
   // JBR 25 sends h2c upgrades that the HTTP/1.1 server would otherwise close.

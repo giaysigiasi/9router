@@ -13,11 +13,13 @@ const PROBE_STALE_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function GET() {
   try {
-    const [combos, connections, nodes, cachedProbes] = await Promise.all([
+    const metaKv = makeKv("comboHealthMeta");
+    const [combos, connections, nodes, cachedProbes, pollMeta] = await Promise.all([
       getCombos(),
       getProviderConnections(),
       getProviderNodes(),
       probesKv.getAll().catch(() => ({})),
+      metaKv.get("_lastPollAt").catch(() => null),
     ]);
     // Build prefix → canonical provider ID map for health resolution
     const providerNodeMap = {};
@@ -25,11 +27,13 @@ export async function GET() {
     for (const node of nodes || []) {
       if (node.prefix && node.id) providerNodeMap[node.prefix] = node.id;
     }
-    // 2) Built-in registry providers: uiAlias/aliases → alias
+    // 2) Built-in registry providers: uiAlias/aliases/id → canonical alias
     for (const entry of registryProviders) {
       if (!entry) continue;
       const canonical = entry.alias || entry.id;
       if (!canonical) continue;
+      // Map entry.id → canonical so connection.provider (which uses id) resolves
+      if (entry.id && entry.id !== canonical) providerNodeMap[entry.id] = canonical;
       if (entry.uiAlias) providerNodeMap[entry.uiAlias] = canonical;
       if (Array.isArray(entry.aliases)) {
         for (const a of entry.aliases) {
@@ -47,7 +51,11 @@ export async function GET() {
         h.probeStale = !probe.checkedAt || (now - new Date(probe.checkedAt).getTime()) > PROBE_STALE_MS;
       }
     }
-    return NextResponse.json({ health });
+    return NextResponse.json({
+      health,
+      lastPollAt: pollMeta?.value || null,
+      pollComboCount: pollMeta?.combos || null,
+    });
   } catch (error) {
     console.log("Error fetching combo health:", error);
     return NextResponse.json({ error: "Failed to fetch combo health" }, { status: 500 });
