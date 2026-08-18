@@ -1,36 +1,14 @@
 import { NextResponse } from "next/server";
+import { pingModelByKind } from "./ping";
 
+// POST /api/models/test - Ping a single model via internal completions or embeddings
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const { model, messages = [] } = body;
-
-    if (!model) {
-      return NextResponse.json({ error: "Model required" }, { status: 400 });
-    }
-
-    // Simulate test latency between 200-800ms
-    const latency = Math.floor(Math.random() * 600) + 200;
-    await new Promise((resolve) => setTimeout(resolve, latency));
-
-    // Mock successful test response
-    return NextResponse.json({
-      success: true,
-      model,
-      latency,
-      status: "ok",
-      response: "Test successful. Model is reachable.",
-      usage: {
-        prompt_tokens: messages.length > 0 ? 10 : 0,
-        completion_tokens: 8,
-        total_tokens: messages.length > 0 ? 18 : 8,
-      },
-    });
-  } catch (error) {
-    console.log("Error testing model:", error);
-    return NextResponse.json(
-      { error: "Failed to test model", details: error.message },
-      { status: 500 }
-    );
+    const { model, kind } = await request.json();
+    if (!model) return NextResponse.json({ error: "Model required" }, { status: 400 });
+    const result = await pingModelByKind(model, kind || "llm");
+    return NextResponse.json(result);
+  } catch (err) {
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
 }
