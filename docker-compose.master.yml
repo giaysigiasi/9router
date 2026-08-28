@@ -1,0 +1,26 @@
+services:
+  9router:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 9router-master:local
+    container_name: 9router-master
+    restart: always
+    ports:
+      - '20131:20130'
+    volumes:
+      - 9router-data:/app/data
+    env_file:
+      - /opt/9router/.env
+    environment:
+      DATA_DIR: /app/data
+      PORT: '20130'
+      HOSTNAME: '0.0.0.0'
+      NODE_ENV: production
+      HEADROOM_URL: http://host.docker.internal:8787
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+volumes:
+  9router-data:
+    name: 9router-data
+    external: true
