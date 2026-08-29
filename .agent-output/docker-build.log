@@ -1,0 +1,371 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 493B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.08kB 0.0s done
+#2 DONE 0.0s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#3 DONE 0.8s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.0s done
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/node:22-alpine
+#5 DONE 0.7s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 448B done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [base 1/2] FROM docker.io/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+#8 resolve docker.io/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+#8 resolve docker.io/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 0.0s done
+#8 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 161.68kB 0.2s done
+#7 DONE 0.2s
+
+#9 [base 2/2] WORKDIR /app
+#9 CACHED
+
+#10 [builder 1/5] RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
+#10 CACHED
+
+#11 [builder 2/5] COPY package.json ./
+#11 CACHED
+
+#12 [builder 3/5] RUN --mount=type=cache,target=/root/.npm   npm install
+#12 33.39 npm warn deprecated prebuild-install@7.1.3: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+#12 47.75 npm warn deprecated eslint@9.39.5: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+#12 80.52 
+#12 80.52 added 626 packages, and audited 627 packages in 1m
+#12 80.52 
+#12 80.52 223 packages are looking for funding
+#12 80.52   run `npm fund` for details
+#12 80.54 
+#12 80.54 2 moderate severity vulnerabilities
+#12 80.54 
+#12 80.54 To address all issues (including breaking changes), run:
+#12 80.54   npm audit fix --force
+#12 80.54 
+#12 80.54 Run `npm audit` for details.
+#12 DONE 82.1s
+
+#13 [builder 4/5] COPY . ./
+#13 DONE 1.4s
+
+#14 [builder 5/5] RUN npm run build
+#14 0.868 
+#14 0.868 > 9router-app@0.5.55 build
+#14 0.868 > next build --webpack
+#14 0.868 
+#14 1.770 ▲ Next.js 16.3.3 (webpack)
+#14 1.828 ✓ Running next.config.mjs took 56ms
+#14 1.887 - Experiments (use with caution):
+#14 1.887   · optimizePackageImports
+#14 1.887   · proxyClientMaxBodySize: "128mb"
+#14 1.887 
+#14 1.997   Creating an optimized production build ...
+#14 84.60 ✓ Compiled successfully in 74s
+#14 84.60   Running TypeScript ...
+#14 84.63   Finished TypeScript in 28ms ...
+#14 84.63   Collecting page data using 11 workers ...
+#14 86.24 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.26 [DB][migrate] applied #1 initial
+#14 86.71 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.71 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.71 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.71 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.72 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.73 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.77 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.77 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.79 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 86.84 [DB] Driver: better-sqlite3 | file: /root/.9router/db/data.sqlite
+#14 93.26   Generating static pages using 11 workers (0/143) ...
+#14 93.69   Generating static pages using 11 workers (35/143) 
+#14 93.69   Generating static pages using 11 workers (71/143) 
+#14 93.69   Generating static pages using 11 workers (107/143) 
+#14 96.91 ✓ Generating static pages using 11 workers (143/143) in 3.6s
+#14 102.1   Finalizing page optimization ...
+#14 102.1   Collecting build traces ...
+#14 167.9 
+#14 167.9 Route (app)
+#14 167.9 ┌ ○ /
+#14 167.9 ├ ○ /_not-found
+#14 167.9 ├ ƒ /api/auth/login
+#14 167.9 ├ ƒ /api/auth/logout
+#14 167.9 ├ ƒ /api/auth/oidc/callback
+#14 167.9 ├ ƒ /api/auth/oidc/start
+#14 167.9 ├ ƒ /api/auth/oidc/test
+#14 167.9 ├ ƒ /api/auth/reset-password
+#14 167.9 ├ ƒ /api/auth/saml/acs
+#14 167.9 ├ ƒ /api/auth/saml/metadata
+#14 167.9 ├ ƒ /api/auth/saml/start
+#14 167.9 ├ ƒ /api/auth/saml/test
+#14 167.9 ├ ƒ /api/auth/status
+#14 167.9 ├ ƒ /api/cli-tools/all-statuses
+#14 167.9 ├ ƒ /api/cli-tools/antigravity-mitm
+#14 167.9 ├ ƒ /api/cli-tools/antigravity-mitm/alias
+#14 167.9 ├ ƒ /api/cli-tools/claude-settings
+#14 167.9 ├ ƒ /api/cli-tools/cline-settings
+#14 167.9 ├ ƒ /api/cli-tools/codex-settings
+#14 167.9 ├ ƒ /api/cli-tools/copilot-settings
+#14 167.9 ├ ƒ /api/cli-tools/cowork-mcp-registry
+#14 167.9 ├ ƒ /api/cli-tools/cowork-mcp-tools
+#14 167.9 ├ ƒ /api/cli-tools/cowork-settings
+#14 167.9 ├ ƒ /api/cli-tools/deepseek-tui-settings
+#14 167.9 ├ ƒ /api/cli-tools/devin-settings
+#14 167.9 ├ ƒ /api/cli-tools/droid-settings
+#14 167.9 ├ ƒ /api/cli-tools/grok-build-settings
+#14 167.9 ├ ƒ /api/cli-tools/hermes-settings
+#14 167.9 ├ ƒ /api/cli-tools/jcode-settings
+#14 167.9 ├ ƒ /api/cli-tools/kilo-settings
+#14 167.9 ├ ƒ /api/cli-tools/openclaw-settings
+#14 167.9 ├ ƒ /api/cli-tools/opencode-settings
+#14 167.9 ├ ƒ /api/combos
+#14 167.9 ├ ƒ /api/combos/[id]
+#14 167.9 ├ ƒ /api/combos/health
+#14 167.9 ├ ƒ /api/headroom/extras
+#14 167.9 ├ ƒ /api/headroom/proxy/[...path]
+#14 167.9 ├ ƒ /api/headroom/restart
+#14 167.9 ├ ƒ /api/headroom/start
+#14 167.9 ├ ƒ /api/headroom/status
+#14 167.9 ├ ƒ /api/headroom/stop
+#14 167.9 ├ ƒ /api/health
+#14 167.9 ├ ƒ /api/init
+#14 167.9 ├ ƒ /api/keys
+#14 167.9 ├ ƒ /api/keys/[id]
+#14 167.9 ├ ƒ /api/locale
+#14 167.9 ├ ƒ /api/mcp/[plugin]/message
+#14 167.9 ├ ƒ /api/mcp/[plugin]/sse
+#14 167.9 ├ ƒ /api/media-providers/tts/deepgram/voices
+#14 167.9 ├ ƒ /api/media-providers/tts/elevenlabs/voices
+#14 167.9 ├ ƒ /api/media-providers/tts/inworld/voices
+#14 167.9 ├ ƒ /api/media-providers/tts/minimax/voices
+#14 167.9 ├ ƒ /api/media-providers/tts/voices
+#14 167.9 ├ ƒ /api/models
+#14 167.9 ├ ƒ /api/models/alias
+#14 167.9 ├ ƒ /api/models/availability
+#14 167.9 ├ ƒ /api/models/custom
+#14 167.9 ├ ƒ /api/models/disabled
+#14 167.9 ├ ƒ /api/models/test
+#14 167.9 ├ ƒ /api/oauth/[provider]/[action]
+#14 167.9 ├ ƒ /api/oauth/codex/bulk-import
+#14 167.9 ├ ƒ /api/oauth/codex/import-token
+#14 167.9 ├ ƒ /api/oauth/cursor/auto-import
+#14 167.9 ├ ƒ /api/oauth/cursor/import
+#14 167.9 ├ ƒ /api/oauth/gitlab/pat
+#14 167.9 ├ ƒ /api/oauth/iflow/cookie
+#14 167.9 ├ ƒ /api/oauth/kiro/api-key
+#14 167.9 ├ ƒ /api/oauth/kiro/auto-import
+#14 167.9 ├ ƒ /api/oauth/kiro/import
+#14 167.9 ├ ƒ /api/oauth/kiro/import-cli-proxy
+#14 167.9 ├ ƒ /api/oauth/kiro/social-authorize
+#14 167.9 ├ ƒ /api/oauth/kiro/social-exchange
+#14 167.9 ├ ƒ /api/pricing
+#14 167.9 ├ ƒ /api/provider-nodes
+#14 167.9 ├ ƒ /api/provider-nodes/[id]
+#14 167.9 ├ ƒ /api/provider-nodes/validate
+#14 167.9 ├ ƒ /api/providers
+#14 167.9 ├ ƒ /api/providers/[id]
+#14 167.9 ├ ƒ /api/providers/[id]/models
+#14 167.9 ├ ƒ /api/providers/[id]/test
+#14 167.9 ├ ƒ /api/providers/[id]/test-models
+#14 167.9 ├ ƒ /api/providers/client
+#14 167.9 ├ ƒ /api/providers/health
+#14 167.9 ├ ƒ /api/providers/kilo/free-models
+#14 167.9 ├ ƒ /api/providers/suggested-models
+#14 167.9 ├ ƒ /api/providers/test-batch
+#14 167.9 ├ ƒ /api/providers/validate
+#14 167.9 ├ ƒ /api/proxy-pools
+#14 167.9 ├ ƒ /api/proxy-pools/[id]
+#14 167.9 ├ ƒ /api/proxy-pools/[id]/test
+#14 167.9 ├ ƒ /api/proxy-pools/cloudflare-deploy
+#14 167.9 ├ ƒ /api/proxy-pools/deno-deploy
+#14 167.9 ├ ƒ /api/proxy-pools/vercel-deploy
+#14 167.9 ├ ƒ /api/pxpipe/health
+#14 167.9 ├ ƒ /api/pxpipe/install
+#14 167.9 ├ ƒ /api/pxpipe/logs
+#14 167.9 ├ ƒ /api/pxpipe/restart
+#14 167.9 ├ ƒ /api/pxpipe/start
+#14 167.9 ├ ƒ /api/pxpipe/stats
+#14 167.9 ├ ƒ /api/pxpipe/status
+#14 167.9 ├ ƒ /api/pxpipe/stop
+#14 167.9 ├ ƒ /api/routes/simulate
+#14 167.9 ├ ƒ /api/settings
+#14 167.9 ├ ƒ /api/settings/database
+#14 167.9 ├ ƒ /api/settings/proxy-test
+#14 167.9 ├ ƒ /api/settings/require-login
+#14 167.9 ├ ƒ /api/shutdown
+#14 167.9 ├ ƒ /api/skills/prompt-designer
+#14 167.9 ├ ƒ /api/tags
+#14 167.9 ├ ƒ /api/token-saver/preview
+#14 167.9 ├ ƒ /api/translator/console-logs
+#14 167.9 ├ ƒ /api/translator/console-logs/stream
+#14 167.9 ├ ƒ /api/translator/load
+#14 167.9 ├ ƒ /api/translator/save
+#14 167.9 ├ ƒ /api/translator/send
+#14 167.9 ├ ƒ /api/translator/translate
+#14 167.9 ├ ƒ /api/tunnel/disable
+#14 167.9 ├ ƒ /api/tunnel/enable
+#14 167.9 ├ ƒ /api/tunnel/status
+#14 167.9 ├ ƒ /api/tunnel/tailscale-check
+#14 167.9 ├ ƒ /api/tunnel/tailscale-disable
+#14 167.9 ├ ƒ /api/tunnel/tailscale-enable
+#14 167.9 ├ ƒ /api/tunnel/tailscale-install
+#14 167.9 ├ ƒ /api/usage/[connectionId]
+#14 167.9 ├ ƒ /api/usage/[connectionId]/codex-reset-credits
+#14 167.9 ├ ƒ /api/usage/chart
+#14 167.9 ├ ƒ /api/usage/history
+#14 167.9 ├ ƒ /api/usage/logs
+#14 167.9 ├ ƒ /api/usage/providers
+#14 167.9 ├ ƒ /api/usage/request-details
+#14 167.9 ├ ƒ /api/usage/request-logs
+#14 167.9 ├ ƒ /api/usage/stats
+#14 167.9 ├ ƒ /api/usage/stream
+#14 167.9 ├ ƒ /api/v1
+#14 167.9 ├ ƒ /api/v1/api/chat
+#14 167.9 ├ ƒ /api/v1/audio/speech
+#14 167.9 ├ ƒ /api/v1/audio/transcriptions
+#14 167.9 ├ ƒ /api/v1/audio/voices
+#14 167.9 ├ ƒ /api/v1/chat/completions
+#14 167.9 ├ ƒ /api/v1/embeddings
+#14 167.9 ├ ƒ /api/v1/images/generations
+#14 167.9 ├ ƒ /api/v1/messages
+#14 167.9 ├ ƒ /api/v1/messages/count_tokens
+#14 167.9 ├ ƒ /api/v1/models
+#14 167.9 ├ ƒ /api/v1/models/[kind]
+#14 167.9 ├ ƒ /api/v1/models/info
+#14 167.9 ├ ƒ /api/v1/responses
+#14 167.9 ├ ƒ /api/v1/responses/compact
+#14 167.9 ├ ƒ /api/v1/search
+#14 167.9 ├ ƒ /api/v1/videos/[id]
+#14 167.9 ├ ƒ /api/v1/videos/edits
+#14 167.9 ├ ƒ /api/v1/videos/extensions
+#14 167.9 ├ ƒ /api/v1/videos/generations
+#14 167.9 ├ ƒ /api/v1/web/fetch
+#14 167.9 ├ ƒ /api/v1beta/models
+#14 167.9 ├ ƒ /api/v1beta/models/[...path]
+#14 167.9 ├ ƒ /api/version
+#14 167.9 ├ ƒ /api/version/shutdown
+#14 167.9 ├ ƒ /api/version/update
+#14 167.9 ├ ○ /callback
+#14 167.9 ├ ○ /dashboard
+#14 167.9 ├ ○ /dashboard/basic-chat
+#14 167.9 ├ ○ /dashboard/cli-tools
+#14 167.9 ├ ƒ /dashboard/cli-tools/[toolId]
+#14 167.9 ├ ○ /dashboard/combos
+#14 167.9 ├ ƒ /dashboard/console-log
+#14 167.9 ├ ○ /dashboard/endpoint
+#14 167.9 ├ ƒ /dashboard/media-providers/[kind]
+#14 167.9 ├ ƒ /dashboard/media-providers/[kind]/[id]
+#14 167.9 ├ ƒ /dashboard/media-providers/combo/[id]
+#14 167.9 ├ ○ /dashboard/media-providers/web
+#14 167.9 ├ ○ /dashboard/mitm
+#14 167.9 ├ ○ /dashboard/model-finder
+#14 167.9 ├ ○ /dashboard/profile
+#14 167.9 ├ ○ /dashboard/provider-health
+#14 167.9 ├ ○ /dashboard/provider-onboard
+#14 167.9 ├ ○ /dashboard/providers
+#14 167.9 ├ ƒ /dashboard/providers/[id]
+#14 167.9 ├ ○ /dashboard/providers/new
+#14 167.9 ├ ○ /dashboard/proxy-pools
+#14 167.9 ├ ○ /dashboard/pxpipe
+#14 167.9 ├ ○ /dashboard/quota
+#14 167.9 ├ ○ /dashboard/route-simulator
+#14 167.9 ├ ○ /dashboard/settings/pricing
+#14 167.9 ├ ○ /dashboard/skills
+#14 167.9 ├ ○ /dashboard/token-saver
+#14 167.9 ├ ○ /dashboard/translator
+#14 167.9 ├ ○ /dashboard/usage
+#14 167.9 ├ ○ /landing
+#14 167.9 ├ ○ /login
+#14 167.9 └ ○ /manifest.webmanifest
+#14 167.9 
+#14 167.9 
+#14 167.9 ƒ Proxy (Middleware)
+#14 167.9 
+#14 167.9 ○  (Static)   prerendered as static content
+#14 167.9 ƒ  (Dynamic)  server-rendered on demand
+#14 167.9 
+#14 168.1 
+#14 168.1 > 9router-app@0.5.55 postbuild
+#14 168.1 > node scripts/copy-standalone-assets.mjs
+#14 168.1 
+#14 168.3 [standalone-assets] Copied static assets to /app/.next/standalone/.next/static
+#14 168.3 [standalone-assets] Copied public assets to /app/.next/standalone/public
+#14 168.3 [standalone-assets] Copied custom-server.js to /app/.next/standalone/custom-server.js
+#14 168.3 npm notice
+#14 168.3 npm notice New major version of npm available! 10.9.8 -> 12.0.2
+#14 168.3 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#14 168.3 npm notice To update run: npm install -g npm@12.0.2
+#14 168.3 npm notice
+#14 DONE 168.5s
+
+#15 [runner  3/13] COPY --from=builder /app/public ./public
+#15 CACHED
+
+#16 [runner  4/13] COPY --from=builder /app/.next/static ./.next/static
+#16 DONE 0.2s
+
+#17 [runner  5/13] COPY --from=builder /app/.next/standalone ./
+#17 DONE 1.3s
+
+#18 [runner  6/13] COPY --from=builder /app/custom-server.js ./custom-server.js
+#18 DONE 0.2s
+
+#19 [runner  7/13] COPY --from=builder /app/open-sse ./open-sse
+#19 DONE 0.1s
+
+#20 [runner  8/13] COPY --from=builder /app/src/mitm ./src/mitm
+#20 DONE 0.1s
+
+#21 [runner  9/13] COPY --from=builder /app/node_modules/node-forge ./node_modules/node-forge
+#21 DONE 0.1s
+
+#22 [runner 10/13] COPY --from=builder /app/node_modules/next ./node_modules/next
+#22 DONE 2.6s
+
+#23 [runner 11/13] COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
+#23 DONE 0.2s
+
+#24 [runner 12/13] RUN mkdir -p /app/data && chown -R node:node /app &&   mkdir -p /app/data-home && chown node:node /app/data-home &&   ln -sf /app/data-home /root/.9router 2>/dev/null || true
+#24 DONE 33.8s
+
+#25 [runner 13/13] RUN apk --no-cache upgrade && apk --no-cache add su-exec &&   printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh &&   chmod +x /entrypoint.sh
+#25 2.202 Preupgrading:
+#25 2.202 (1/2) Upgrading libapk (3.0.6-r0 -> 3.0.7-r0)
+#25 2.278 (2/2) Upgrading apk-tools (3.0.6-r0 -> 3.0.7-r0)
+#25 2.340 Executing busybox-1.37.0-r31.trigger
+#25 2.396 Continuing with the main upgrade transaction:
+#25 3.358 (1/2) Upgrading libcrypto3 (3.5.7-r0 -> 3.5.8-r0)
+#25 3.682 (2/2) Upgrading libssl3 (3.5.7-r0 -> 3.5.8-r0)
+#25 3.773 OK: 10.8 MiB in 18 packages
+#25 5.121 (1/1) Installing su-exec (0.3-r0)
+#25 5.184 Executing busybox-1.37.0-r31.trigger
+#25 5.191 OK: 10.9 MiB in 19 packages
+#25 DONE 5.3s
+
+#26 exporting to image
+#26 exporting layers
+#26 exporting layers 16.6s done
+#26 exporting manifest sha256:dc586625403391ef4bdd58400284593cd8cd80ac4ccc8657ea7a230b71880282 0.0s done
+#26 exporting config sha256:e0f22d3990fb28756e8e09b5f208accbf7082e41798d36503b5170b43f119900 0.0s done
+#26 exporting attestation manifest sha256:5058f6c8d804eab2e22aaf4b500f21ec1f18926926441330218d1a1d70452e62 0.0s done
+#26 exporting manifest list sha256:2124d6533636b3e94782d551e4af0f0b03fa89a6c789136c7b02de6b1528e6f5 0.0s done
+#26 naming to docker.io/library/9router:local
+#26 naming to docker.io/library/9router:local done
+#26 unpacking to docker.io/library/9router:local
+#26 unpacking to docker.io/library/9router:local 19.2s done
+#26 DONE 35.9s
+
+#27 resolving provenance for metadata file
+#27 DONE 0.0s
