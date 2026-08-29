@@ -1,20 +1,71 @@
 # Current Task Handoff
 
 ## Goal
-Role-based cross-provider combos for multi-agent orchestrator. Each CLI agent (codex, claude, cline, opencode, etc.) gets one combo per role (pm, ba, dev, qa, supervisor), with models selected across ALL providers based on role suitability thresholds.
+Fix free-model quota exhaustion in agent loops — combo fallback cooldown was too short (2s) causing repeated retries against exhausted free-tier models.
+
+## What Was Done (D1 — COMPLETE ✅)
+
+### Phase 1: Fixed 30min cooldown
+1. Changed quota cooldown from ~2s to fixed `MAX_RATE_LIMIT_COOLDOWN_MS` (30min)
+2. Removed backoffLevel tracking (fundamentally broken in combo context)
+
+### Phase 2: Data flow fix (resetsAtMs threading)
+The `retryAfter` ISO string branch was dead code — combo.js read `errorBody?.retryAfter` but the response body never contained it. Fixed by threading `resetsAtMs` (precise ms epoch) through the error response chain:
+
+1. **`open-sse/utils/error.js`**:
+   - `buildErrorBody(statusCode, message, resetsAtMs)` — adds `resetsAtMs` to response body JSON
+   - `errorResponse(statusCode, message, resetsAtMs)` — passes through
+   - `createErrorResult(statusCode, message, resetsAtMs)` — now puts `resetsAtMs` in response body (previously was only on result object, not in body)
+
+2. **`open-sse/services/combo.js`**:
+   - Reads `errorBody?.resetsAtMs` from response body (replaces dead `retryAfter` ISO path)
+   - If `resetsAtMs` available → use `resetsAtMs - now` as precise cooldown (provider-authoritative, NO cap)
+   - Else → `MAX_RATE_LIMIT_COOLDOWN_MS` (30min) default
+   - Removed `Math.min(effectiveCooldown, MAX_CAP)` cap that was incorrectly capping provider-reported longer windows
+
+3. **`tests/unit/combo-quota-jump.test.js`** (12 tests, all passing):
+   - "quota block with provider resetsAtMs uses precise cooldown (no cap)" — 45min → ~45min (not capped)
+   - "quota block with short resetsAtMs uses provider time" — 60s → ~60s (respects provider)
+
+### Phase 3: All-models-blocked early-exit (COMPLETE ✅)
+
+**Problem**: When all combo models exhausted, the loop burned N upstream 429 calls then returned a bare 503 with no Retry-After → agent loop stalled.
+
+**Fix**: Early-exit check after quota-jump reorder — when `blockedCount >= rotatedModels.length`, return `503` + `Retry-After` immediately with zero upstream calls.
+
+**Implementation**:
+- **`open-sse/services/combo.js`**:
+  - `getEarliestComboBlockExpiry(comboName)` — returns the soonest active block expiry Date (lazy-evicts expired entries)
+  - Early-exit in `handleComboChat` after `getQuotaJumpedModels`: checks `blocked.size >= models.length` → returns `unavailableResponse(503, "All combo models are quota-limited", retryIso, retryHuman)`
+  - `unavailableResponse` already builds the `Retry-After` header
+
+- **Tests** (15 total, all passing):
+  - "all models blocked → immediate 503 + Retry-After, zero upstream calls" — verifies no `handleSingleModel` calls, 503 status, Retry-After header, quota-limited message
+  - "only first model blocked → combo proceeds, no halt" — verifies combo doesn't halt when only some models blocked
+  - "expired block does not trigger all-blocked halt" — blocks expire → combo proceeds normally
+
+## Key Design Decisions
+- `resetsAtMs` is authoritative when provider reports it (codex `resets_at`, gemini `RetryInfo`)
+- No upper cap on provider-reported reset time — trust the provider
+-30min default only when no `resetsAtMs` available (most providers)
+- For daily quotas without resetsAtMs: still churns ~48 retries/day (addressed by D2 round-robin)
+
+## Data Flow (now complete)
+```
+codex:parseUpstreamError → chatCore → createErrorResult(status, msg, resetsAtMs)
+  → errorResponse(status, msg, resetsAtMs) → buildErrorBody → {resetsAtMs in body}
+  → combo reads errorBody.resetsAtMs → precise cooldown
+```
 
 ## State
-- **Done**: 
-  - `--list` mode (single-suffix inspect)
-  - `--cross-provider` flag with auth boundary enforcement
-  - `--roles pm,ba,dev,qa,supervisor` mode implemented
-  - `ROLE_PROFILES` with per-role thresholds (minCtx, requireReasoning, minStrength)
-  - `passesRoleFilter()` and `getRoleModels()` functions
-  - `listModels()` updated for role-mode sub-tables
-  - `runOnce()` updated for role-mode combo creation
-  - Self-check passes with 15+ role-specific tests
-- **In Progress**: Ready for live testing
-- **Blocked**: None
+- **Done**: D1 complete — fixed cooldown + resetsAtMs data flow + all-blocked early-exit
+- **Container**: Running on port 20130
+- **Tests**: 15/15 passing (vitest)
+
+## Next Tasks
+1. **D2**: Configure round-robin rotation for agent combos to spread load across 18 models
+2. **D3**: Persist `comboQuotaBlocked` to KV for redeploy survival
+3. **D4** (optional): Absolute max cap (24h) on resetsAtMs-derived cooldown as defense against provider clock skew
 
 ## Role Thresholds
 | Role | minCtx | requireReasoning | minStrength | Use case |

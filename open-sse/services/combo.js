@@ -6,6 +6,7 @@ import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
+import { MAX_RATE_LIMIT_COOLDOWN_MS } from "../config/errorConfig.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
@@ -128,6 +129,27 @@ export function markComboModelQuotaBlocked(comboName, model, cooldownMs) {
   let blocked = comboQuotaBlocked.get(key);
   if (!blocked) { blocked = new Map(); comboQuotaBlocked.set(key, blocked); }
   blocked.set(model, Date.now() + cooldownMs);
+}
+
+/**
+ * Get the earliest (soonest) active quota-block expiry for a combo, or null.
+ * Returns a Date whose .toISOString() can be used as Retry-After.
+ * Lazy-evicts expired entries first.
+ */
+export function getEarliestComboBlockExpiry(comboName) {
+  const key = comboName || "__default__";
+  const blocked = comboQuotaBlocked.get(key);
+  if (!blocked || blocked.size === 0) return null;
+
+  const now = Date.now();
+  let dirty = false;
+  let earliest = null;
+  for (const [model, until] of blocked) {
+    if (until <= now) { blocked.delete(model); dirty = true; continue; }
+    if (earliest === null || until < earliest) earliest = until;
+  }
+  if (dirty && blocked.size === 0) comboQuotaBlocked.delete(key);
+  return earliest != null ? new Date(earliest) : null;
 }
 
 // Trailing run of items after the last assistant/model turn = the current user
@@ -349,6 +371,24 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   }
   rotatedModels = jumpedModels;
 
+  // All-models-blocked early exit: if every combo model is quota-blocked,
+  // return a single 503 + Retry-After immediately instead of burning N
+  // upstream calls that all 429 then returning a bare 503 with no retry info.
+  // This is the ONLY condition a combo should halt — any single blocked model
+  // (including the combo's best) only sinks to tail; it never stops the combo.
+  if (rotatedModels.length > 0) {
+    const earliest = getEarliestComboBlockExpiry(comboName);
+    const key = comboName || "__default__";
+    const blocked = comboQuotaBlocked.get(key);
+    const blockedCount = blocked ? blocked.size : 0;
+    if (blockedCount >= rotatedModels.length && earliest) {
+      const retryIso = earliest.toISOString();
+      const retryHuman = formatRetryAfter(retryIso);
+      log.warn("COMBO", `All ${rotatedModels.length} combo models quota-limited | retry ${retryHuman}`);
+      return unavailableResponse(503, "All combo models are quota-limited", retryIso, retryHuman);
+    }
+  }
+
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
@@ -369,10 +409,13 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Extract error info from response
       let errorText = result.statusText || "";
       let retryAfter = null;
+      let resetsAtMs = null;
       try {
         const errorBody = await result.clone().json();
         errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
         retryAfter = errorBody?.retryAfter || null;
+        // Provider-reported precise reset time (e.g. codex resets_at, gemini RetryInfo)
+        resetsAtMs = errorBody?.resetsAtMs || null;
       } catch {
         // Ignore JSON parse errors
       }
@@ -398,9 +441,19 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Quota hit: block this model for the combo's cooldown and jump straight to
       // the last model, skipping the middle ones for this request. If already on
       // the last model, no jump — fall through to normal fail handling.
+      // Prefer provider-reported resetsAtMs (precise epoch from codex resets_at,
+      // gemini RetryInfo, etc.) when available. Otherwise fall back to fixed
+      // MAX_RATE_LIMIT_COOLDOWN_MS (30min) which covers hourly free-tier quotas.
       if (reason === "quota" && i < rotatedModels.length - 1) {
-        markComboModelQuotaBlocked(comboName, modelStr, cooldownMs);
-        log.warn("COMBO", `Model ${modelStr} quota-limited, blocking ${cooldownMs}ms and jumping to last model`);
+        let effectiveCooldown = MAX_RATE_LIMIT_COOLDOWN_MS;
+        if (resetsAtMs) {
+          const retryMs = resetsAtMs - Date.now();
+          if (retryMs > 0) effectiveCooldown = retryMs;
+        }
+        effectiveCooldown = Math.max(effectiveCooldown, 1000); // floor 1s
+
+        markComboModelQuotaBlocked(comboName, modelStr, effectiveCooldown);
+        log.warn("COMBO", `Model ${modelStr} quota-limited, blocking ${effectiveCooldown}ms and jumping to last model`);
         lastError = errorText || String(result.status);
         if (!lastStatus) lastStatus = result.status;
         i = rotatedModels.length - 2; // loop i++ lands on the final (last) model
