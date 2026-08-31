@@ -537,18 +537,20 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
   // Use cached probe from health object (populated by API from KV cache)
   const probe = health?.probe;
 
-  // Build model-level health map from probe data
+  // Build model-level health map.
+  // Red = config health marks the model unavailable (same source as the
+  // "Healthy X/Y" status). Green = live probe confirmed the model works.
+  // A transient probe failure (modelProbes[].ok === false) must NOT paint a
+  // red dot when the combo is reported healthy, otherwise the dots contradict
+  // the overall status shown on the card.
   const modelHealthMap = useMemo(() => {
     const map = {};
+    if (health?.unavailableModels) {
+      for (const m of health.unavailableModels) map[m] = false;
+    }
     if (probe?.modelProbes) {
       for (const mp of probe.modelProbes) {
-        map[mp.model] = mp.ok;
-      }
-    }
-    // Also mark unavailable models from static health
-    if (health?.unavailableModels) {
-      for (const m of health.unavailableModels) {
-        if (!(m in map)) map[m] = false;
+        if (mp.ok && !(mp.model in map)) map[mp.model] = true;
       }
     }
     return map;
