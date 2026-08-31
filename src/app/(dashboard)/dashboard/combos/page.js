@@ -30,6 +30,53 @@ const COMBO_SORT_OPTIONS = [
 ];
 const HEALTH_SORT_RANK = { unavailable: 0, degraded: 1, "no-models": 2, healthy: 3 };
 const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [] };
+
+// Combo templates for quick creation
+const COMBO_TEMPLATES = [
+  {
+    name: "Free Coding",
+    description: "Free-tier coding models from multiple providers",
+    models: [
+      "kilo-gateway/gemini-2.5-flash",
+      "kilo-gateway/gemini-2.5-pro",
+      "kilocode/qwen3-coder-480b",
+      "kilocode/glm-4.5",
+      "openrouter/google/gemini-2.5-flash-preview",
+    ],
+  },
+  {
+    name: "Free Reasoning",
+    description: "Free-tier reasoning models",
+    models: [
+      "kilo-gateway/gemini-2.5-pro",
+      "kilo-gateway/gemini-2.5-flash",
+      "kilocode/qwen3-coder-480b",
+      "kilocode/deepseek-r1",
+      "openrouter/google/gemini-2.5-pro-preview",
+    ],
+  },
+  {
+    name: "Free Vision",
+    description: "Free-tier models with vision support",
+    models: [
+      "kilo-gateway/gemini-2.5-flash",
+      "kilo-gateway/gemini-2.5-pro",
+      "openrouter/google/gemini-2.5-flash-preview",
+      "openrouter/meta-llama/llama-4-maverick",
+    ],
+  },
+  {
+    name: "Multi-Provider Fallback",
+    description: "Broad fallback across all free providers",
+    models: [
+      "kilo-gateway/gemini-2.5-flash",
+      "kilocode/qwen3-coder-480b",
+      "openrouter/google/gemini-2.5-flash-preview",
+      "bazaarlink/hunter-alpha",
+      "kilocode/glm-4.5",
+    ],
+  },
+];
 const EMPTY_CAPACITY_ADAPTER = {
   vision: { ...EMPTY_CAP_ENTRY },
   pdf: { ...EMPTY_CAP_ENTRY },
@@ -67,6 +114,9 @@ export default function CombosPage() {
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
+  const [fixingComboId, setFixingComboId] = useState(null);
+  const [fixingAll, setFixingAll] = useState(false);
+  const [fixResults, setFixResults] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -223,6 +273,54 @@ export default function CombosPage() {
     }
   };
 
+  // Auto-fix a single combo: remove models from inactive providers
+  const handleFixCombo = async (comboId) => {
+    setFixingComboId(comboId);
+    try {
+      const res = await fetch(`/api/combos/${comboId}/fix`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to fix combo");
+        return;
+      }
+      setFixResults((prev) => ({ ...prev, [comboId]: data }));
+      if (data.fixed) {
+        await fetchData(); // Refresh combos list
+      }
+    } catch (error) {
+      console.log("Error fixing combo:", error);
+      alert("Failed to fix combo");
+    } finally {
+      setFixingComboId(null);
+    }
+  };
+
+  // Bulk fix all degraded/unavailable combos
+  const handleFixAll = async () => {
+    const degradedIds = Object.entries(comboHealth)
+      .filter(([, h]) => h.status === "degraded" || h.status === "unavailable")
+      .map(([id]) => id);
+    if (degradedIds.length === 0) return;
+    setFixingAll(true);
+    let fixedCount = 0;
+    for (const id of degradedIds) {
+      try {
+        const res = await fetch(`/api/combos/${id}/fix`, { method: "POST" });
+        const data = await res.json();
+        if (data.fixed) fixedCount++;
+        setFixResults((prev) => ({ ...prev, [id]: data }));
+      } catch { /* continue */ }
+    }
+    setFixingAll(false);
+    if (fixedCount > 0) await fetchData();
+  };
+
+  // Count degraded combos for the bulk fix button
+  const degradedCount = useMemo(
+    () => Object.values(comboHealth).filter((h) => h.status === "degraded" || h.status === "unavailable").length,
+    [comboHealth],
+  );
+
   const sortedCombos = useMemo(() => {
     if (sortMode === "default") return combos;
     return [...combos].sort((a, b) => {
@@ -266,6 +364,11 @@ export default function CombosPage() {
             <Button icon="health_and_safety" variant="ghost" onClick={handleProbeCombos} disabled={probing} className="whitespace-nowrap">
               {probing ? "Checking..." : "Check Health"}
             </Button>
+            {degradedCount > 0 && (
+              <Button icon="auto_fix_high" variant="ghost" onClick={handleFixAll} disabled={fixingAll} className="whitespace-nowrap text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300">
+                {fixingAll ? "Fixing..." : `Fix All (${degradedCount})`}
+              </Button>
+            )}
             {lastPollAt && (
               <span className="text-[11px] text-text-muted whitespace-nowrap" title={`Auto-polled at ${new Date(lastPollAt).toLocaleString()}`}>
                 Last: {new Date(lastPollAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -318,6 +421,9 @@ export default function CombosPage() {
                health={comboHealth[combo.id]}
                probe={comboProbes[combo.id]}
                onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
+               onFix={() => handleFixCombo(combo.id)}
+               fixing={fixingComboId === combo.id}
+               fixResult={fixResults[combo.id]}
             />
           ))}
         </div>
@@ -339,6 +445,7 @@ export default function CombosPage() {
           onClose={() => setShowCreateModal(false)}
           onSave={handleCreate}
           activeProviders={activeProviders}
+          templates={COMBO_TEMPLATES}
         />
       )}
 
@@ -422,13 +529,32 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy, onFix, fixing, fixResult }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
   // Use cached probe from health object (populated by API from KV cache)
   const probe = health?.probe;
+
+  // Build model-level health map from probe data
+  const modelHealthMap = useMemo(() => {
+    const map = {};
+    if (probe?.modelProbes) {
+      for (const mp of probe.modelProbes) {
+        map[mp.model] = mp.ok;
+      }
+    }
+    // Also mark unavailable models from static health
+    if (health?.unavailableModels) {
+      for (const m of health.unavailableModels) {
+        if (!(m in map)) map[m] = false;
+      }
+    }
+    return map;
+  }, [probe, health]);
+
+  const needsFix = health && (health.status === "degraded" || health.status === "unavailable");
 
   return (
     <Card padding="sm" className="group">
@@ -453,12 +579,22 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               {combo.models.length === 0 ? (
                 <span className="text-xs text-text-muted italic">No models</span>
               ) : (
-                combo.models.slice(0, 3).map((model, index) => (
-                  <code key={index} className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
-                    <span>{model}</span>
-                    <CapacityBadges caps={getCaps?.(model)} />
-                  </code>
-                ))
+                combo.models.slice(0, 3).map((model, index) => {
+                  const modelOk = modelHealthMap[model];
+                  const hasProbe = model in modelHealthMap;
+                  return (
+                    <code key={index} className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
+                      {hasProbe && (
+                        <span
+                          className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${modelOk ? "bg-emerald-500" : "bg-red-500"}`}
+                          title={modelOk ? "Model healthy" : "Model unavailable"}
+                        />
+                      )}
+                      <span>{model}</span>
+                      <CapacityBadges caps={getCaps?.(model)} />
+                    </code>
+                  );
+                })
               )}
               {combo.models.length > 3 && (
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
@@ -529,9 +665,35 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               <span className="material-symbols-outlined text-[18px]">delete</span>
               <span className="text-[10px] leading-tight">Delete</span>
             </button>
+            {needsFix && onFix && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onFix(); }}
+                disabled={fixing}
+                className="flex flex-col items-center rounded px-2 py-1 text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
+                title="Auto-fix: remove unavailable models"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {fixing ? "hourglass_empty" : "auto_fix_high"}
+                </span>
+                <span className="text-[10px] leading-tight">{fixing ? "Fixing..." : "Fix"}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Fix result banner */}
+      {fixResult && (
+        <div className={`mt-2 rounded-md px-3 py-2 text-xs ${fixResult.fixed ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
+          {fixResult.fixed ? (
+            <span>
+              <span className="font-medium">Fixed!</span> Removed {fixResult.removedModels?.length} unavailable model(s). {fixResult.remainingModels?.length} remaining.
+            </span>
+          ) : (
+            <span>{fixResult.message}</span>
+          )}
+        </div>
+      )}
 
       {/* Judge model picker (single-select; combo members make natural judges too) */}
       {showJudgeSelect && (

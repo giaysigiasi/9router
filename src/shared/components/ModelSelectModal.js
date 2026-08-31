@@ -396,6 +396,26 @@ export default function ModelSelectModal({
     return groups;
   }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels]);
 
+  // Build set of active provider IDs for status indicators
+  const activeProviderIds = useMemo(() => {
+    const ids = new Set();
+    for (const conn of activeProviders) {
+      if (conn.isActive !== false) {
+        ids.add(conn.provider);
+        // Also add alias if available
+        const alias = getProviderAlias(conn.provider);
+        if (alias) ids.add(alias);
+      }
+    }
+    // Free providers with noAuth are always considered active
+    for (const id of NO_AUTH_PROVIDER_IDS) {
+      ids.add(id);
+      const alias = getProviderAlias(id);
+      if (alias) ids.add(alias);
+    }
+    return ids;
+  }, [activeProviders]);
+
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
     if (kindFilter || capFilter) return [];
@@ -530,10 +550,16 @@ export default function ModelSelectModal({
         )}
 
         {/* Provider models */}
-        {Object.entries(filteredGroups).map(([providerId, group]) => (
+        {Object.entries(filteredGroups).map(([providerId, group]) => {
+          const isProviderActive = activeProviderIds.has(providerId) || activeProviderIds.has(group.alias);
+          return (
           <div key={providerId}>
             {/* Provider header */}
             <div className="flex items-center gap-1.5 mb-1.5 sticky top-0 bg-surface py-0.5">
+              <span
+                className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${isProviderActive ? "bg-emerald-500" : "bg-red-400"}`}
+                title={isProviderActive ? "Provider connected" : "Provider not connected"}
+              />
               <ProviderIcon
                 src={`/providers/${providerId}.png`}
                 alt={group.name}
@@ -597,7 +623,8 @@ export default function ModelSelectModal({
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {Object.keys(filteredGroups).length === 0 && filteredCombos.length === 0 && (
           <div className="text-center py-4 text-text-muted">

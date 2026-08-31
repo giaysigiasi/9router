@@ -50,7 +50,7 @@ function ModelItem({ index, model, isFirst, isLast, onEdit, onMoveUp, onMoveDown
 }
 
 // Reusable Combo create/edit modal. forcePrefix auto-prepends to name.
-export default function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, forcePrefix = "", title }) {
+export default function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, forcePrefix = "", title, templates }) {
   // Strip prefix when editing existing combo so user only edits suffix
   const initialName = combo?.name
     ? (forcePrefix && combo.name.startsWith(forcePrefix) ? combo.name.slice(forcePrefix.length) : combo.name)
@@ -130,6 +130,31 @@ export default function ComboFormModal({ isOpen, combo, onClose, onSave, activeP
               {forcePrefix ? `Auto-prefixed with "${forcePrefix}". ` : ""}Only letters, numbers, -, _ and . allowed
             </p>
           </div>
+
+          {/* Templates (only for create, not edit) */}
+          {!isEdit && templates && templates.length > 0 && (
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">Templates</label>
+              <div className="flex flex-wrap gap-1.5">
+                {templates.map((tpl) => (
+                  <button
+                    key={tpl.name}
+                    type="button"
+                    onClick={() => {
+                      setModels(tpl.models);
+                      if (!name.trim()) setName(tpl.name.toLowerCase().replace(/\s+/g, "-"));
+                    }}
+                    className="group/tpl inline-flex items-center gap-1.5 rounded-lg border border-black/10 dark:border-white/10 px-2.5 py-1.5 text-xs font-medium text-text-main hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                    title={`${tpl.description}\n${tpl.models.length} models`}
+                  >
+                    <span className="material-symbols-outlined text-[14px] text-primary opacity-60 group-hover/tpl:opacity-100">bolt</span>
+                    {tpl.name}
+                    <span className="text-[10px] text-text-muted">({tpl.models.length})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="text-sm font-medium mb-1.5 block">Models</label>

@@ -54,6 +54,7 @@ docs/*
 !docs/NEW_FEATURES.md
 !docs/ARCHITECTURE.md
 !docs/COMBO-AGENTIC-LOOP.md
+!docs/combos-ui-improvements.md
 test/*
 open-sse/test/*
 RM.vn.md
