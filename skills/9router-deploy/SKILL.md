@@ -43,9 +43,11 @@ ssh p106-platform 'cd /opt/9router && git fetch origin && git reset --hard origi
 ### 3. Rebuild only 9router-source (leave master running)
 
 ```bash
-ssh p106-platform 'cd /opt/9router && docker compose build 9router'
+ssh p106-platform 'cd /opt/9router && docker compose build --no-cache 9router'
 ssh p106-platform 'cd /opt/9router && docker compose up -d --force-recreate 9router'
 ```
+
+> ⚠️ **Always use `--no-cache`** — Docker's build cache can reuse the `COPY . ./` layer even when source files changed, resulting in a container with stale code. `--no-cache` forces a fresh build that picks up new source files.
 
 This recreates only `9router-source` (port 20130). `9router-master` (port 20131) stays untouched.
 
@@ -73,7 +75,7 @@ ssh p106-platform 'docker logs 9router-source --tail 20'
 If the new code breaks 9router-source:
 
 ```bash
-ssh p106-platform 'cd /opt/9router && git revert HEAD && docker compose build 9router && docker compose up -d --force-recreate 9router'
+ssh p106-platform 'cd /opt/9router && git revert HEAD && docker compose build --no-cache 9router && docker compose up -d --force-recreate 9router'
 ```
 
 Or switch traffic to master (port 20131) while debugging.
