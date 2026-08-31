@@ -53,6 +53,7 @@ docs/*
 !docs/AI_BOOK.md
 !docs/NEW_FEATURES.md
 !docs/ARCHITECTURE.md
+!docs/COMBO-AGENTIC-LOOP.md
 test/*
 open-sse/test/*
 RM.vn.md
