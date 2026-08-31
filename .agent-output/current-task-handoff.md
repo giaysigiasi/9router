@@ -1,6 +1,33 @@
 # Current Task Handoff
 
 ## Goal
+Fix "Check Health" button on /dashboard/combos — POST /api/combos/health returned 500 "Failed to probe combo health" because `pingModelByKind` had no try-catch.
+
+## What Was Done (COMPLETE ✅)
+
+### Fix: try-catch around combo-level probe
+**File**: `src/app/api/combos/health/route.js` POST handler
+
+**Problem**: `pingModelByKind(combo.name, "chat")` on line 71 had no try-catch. If the internal fetch to `http://127.0.0.1:{PORT}/api/v1/chat/completions` threw a network error (connection refused, AbortSignal timeout, DNS failure), the error propagated through `Promise.all` into the outer catch block, returning a generic 500 "Failed to probe combo health" — killing the health check for ALL combos.
+
+**Fix**: Wrapped the entire combo map callback body in `try { ... } catch (err) { ... }`, returning a graceful `{ id, name, status: "unavailable", error: err.message, checkedAt }` per combo. This matches the pattern already used in `src/lib/backgroundComboHealthPoll.js` (lines 70-101).
+
+**Note**: The inner model-level probes (line 76-80) already had try-catch — only the top-level combo probe was missing it.
+
+### Verification (2026-08-30)
+- Tested `POST /api/combos/health` from inside container with CLI token auth → **200 OK**
+- Combos with timeouts gracefully return `"status": "unavailable"` with error message
+- Healthy combos return `"status": "healthy"` with latencyMs
+- No "Error probing combo health" errors in server logs
+- Fix is confirmed working end-to-end
+
+### Tests
+- 15/15 combo-quota-jump tests passing
+- 4/4 ping-reasoning-models tests passing
+
+---
+
+## Previous Goal (D1 — COMPLETE ✅)
 Fix free-model quota exhaustion in agent loops — combo fallback cooldown was too short (2s) causing repeated retries against exhausted free-tier models.
 
 ## What Was Done (D1 — COMPLETE ✅)

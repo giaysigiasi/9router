@@ -68,41 +68,51 @@ export async function POST() {
   try {
     const combos = (await getCombos()).filter((combo) => !combo.kind || combo.kind === "llm");
     const probes = await Promise.all(combos.map(async (combo) => {
-      const result = await pingModelByKind(combo.name, "chat");
-      const degraded = !result.ok;
-      // Auto-move-to-tail: mark individual models that are degraded
-      if (degraded && Array.isArray(combo.models)) {
-        // Probe each model individually to find which ones are degraded
-        const modelProbes = await Promise.all(combo.models.map(async (m) => {
-          try {
-            const r = await pingModelByKind(m, "chat");
-            return { model: m, ok: r.ok };
-          } catch { return { model: m, ok: false }; }
-        }));
-        for (const mp of modelProbes) {
-          if (!mp.ok) {
-            markComboModelQuotaBlocked(combo.name, mp.model, DEGRADE_COOLDOWN_MS);
+      try {
+        const result = await pingModelByKind(combo.name, "chat");
+        const degraded = !result.ok;
+        // Auto-move-to-tail: mark individual models that are degraded
+        if (degraded && Array.isArray(combo.models)) {
+          // Probe each model individually to find which ones are degraded
+          const modelProbes = await Promise.all(combo.models.map(async (m) => {
+            try {
+              const r = await pingModelByKind(m, "chat");
+              return { model: m, ok: r.ok };
+            } catch { return { model: m, ok: false }; }
+          }));
+          for (const mp of modelProbes) {
+            if (!mp.ok) {
+              markComboModelQuotaBlocked(combo.name, mp.model, DEGRADE_COOLDOWN_MS);
+            }
           }
+          return {
+            id: combo.id,
+            name: combo.name,
+            status: "degraded",
+            latencyMs: result.latencyMs,
+            error: result.error,
+            checkedAt: new Date().toISOString(),
+            modelProbes: modelProbes.map(mp => ({ model: mp.model, ok: mp.ok })),
+            autoPushedToTail: modelProbes.filter(mp => !mp.ok).map(mp => mp.model),
+          };
         }
         return {
           id: combo.id,
           name: combo.name,
-          status: "degraded",
+          status: result.ok ? "healthy" : "unavailable",
           latencyMs: result.latencyMs,
           error: result.error,
           checkedAt: new Date().toISOString(),
-          modelProbes: modelProbes.map(mp => ({ model: mp.model, ok: mp.ok })),
-          autoPushedToTail: modelProbes.filter(mp => !mp.ok).map(mp => mp.model),
+        };
+      } catch (err) {
+        return {
+          id: combo.id,
+          name: combo.name,
+          status: "unavailable",
+          error: err?.message || "probe failed",
+          checkedAt: new Date().toISOString(),
         };
       }
-      return {
-        id: combo.id,
-        name: combo.name,
-        status: result.ok ? "healthy" : "unavailable",
-        latencyMs: result.latencyMs,
-        error: result.error,
-        checkedAt: new Date().toISOString(),
-      };
     }));
     // Cache probe results in KV for the GET endpoint
     const probeMap = {};
