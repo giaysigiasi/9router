@@ -1,6 +1,6 @@
 ---
 name: 9router-deploy
-description: Deploy 9Router to UAT server (p106-platform) and push to all remotes. Use when the user wants to deploy, push to gitlab, push to p106, or update the UAT 9router instance.
+description: Deploy 9Router to UAT server (p106-platform) with zero-downtime and push to GitHub/GitLab. Use when the user wants to deploy, push to gitlab, or update the UAT 9router instance.
 ---
 
 # 9Router Deployment Playbook
@@ -10,8 +10,14 @@ description: Deploy 9Router to UAT server (p106-platform) and push to all remote
 | Remote | URL | Purpose |
 |---|---|---|
 | `origin` / `improvement` | `https://github.com/giaysigiasi/9router.git` | GitHub main |
-| `gitlab` | `http://192.168.1.33:8080/lab/9router.git` | Internal GitLab |
-| `p106` | `ssh://davidtran@p106-platform/opt/9router` | UAT server |
+| `gitlab` | `http://192.168.1.33:8080/lab/9router.git` | Internal GitLab (hosted **on p106 itself**) |
+| `p106` | `ssh://davidtran@p106-platform/opt/9router` | UAT server git repo |
+
+> ⚠️ **`git push p106 david-dev` is REJECTED** — `/opt/9router` on the UAT box is a
+> non-bare repo with `david-dev` checked out, so Git refuses to push to the checked-out
+> branch. The deploy does **not** depend on this push: the UAT box does `git fetch origin`
+> (its `origin` = GitHub), so the code reaches UAT via the **GitHub** push. Omit the
+> `git push p106` line (or expect it to fail harmlessly).
 
 ## UAT Topology (p106-platform)
 
@@ -26,12 +32,17 @@ Rebuild does NOT touch the volume — data (DB, credentials, combos) is safe.
 
 ## Zero-Downtime Deploy Steps
 
-### 1. Push to all remotes
+**Hard rule:** `9router-master` (20131) stays up the entire time as the live fallback.
+We only stop/recreate `9router-source` (20130). The recreate has a brief gap that master
+covers. The deploy is "zero-downtime" only if master is healthy **and** the new source
+container actually comes back `Up` (a `Created`-but-not-`Up` container = UAT is down).
+
+### 1. Push to remotes
 
 ```bash
 git push origin david-dev
 git push gitlab david-dev
-git push p106 david-dev
+# git push p106 david-dev  # rejected (non-bare checked-out branch) — see Remotes note
 ```
 
 ### 2. Pull on UAT server
@@ -40,31 +51,75 @@ git push p106 david-dev
 ssh p106-platform 'cd /opt/9router && git fetch origin && git reset --hard origin/david-dev'
 ```
 
-### 3. Rebuild only 9router-source (leave master running)
+### 3. Rebuild 9router-source — DETACHED (the build exceeds the 30s SSH client timeout)
+
+`docker compose build` takes ~3–5 min; the `RUN chown -R node:node /app` step alone takes
+~4 min and the log looks frozen — it is **not** stuck. A foreground build gets killed when
+the SSH client times out, leaving a half-built / un-tagged image. Launch it detached and
+**poll a log**; never re-launch (a second build will compete with the first):
 
 ```bash
-ssh p106-platform 'cd /opt/9router && docker compose build --no-cache 9router'
-ssh p106-platform 'cd /opt/9router && docker compose up -d --force-recreate 9router'
+ssh p106-platform 'cd /opt/9router && setsid docker compose build --no-cache 9router > /tmp/9router-build.log 2>&1 < /dev/null &'
 ```
 
-> ⚠️ **Always use `--no-cache`** — Docker's build cache can reuse the `COPY . ./` layer even when source files changed, resulting in a container with stale code. `--no-cache` forces a fresh build that picks up new source files.
+> The launch `ssh` may report a client "timeout"/stderr error — that is expected and
+> harmless. The build keeps running on the server. Poll instead:
 
-This recreates only `9router-source` (port 20130). `9router-master` (port 20131) stays untouched.
+```bash
+ssh p106-platform 'tail -5 /tmp/9router-build.log'          # wait for "Image 9router:local Built"
+ssh p106-platform 'docker images 9router:local'             # confirm new image id landed
+```
 
-### 4. Verify
+Stop polling only when the log ends with `Image 9router:local Built` (and a
+`writing image sha256:...` line). `9router:local` must show a new image ID.
+
+> ⚠️ **Always use `--no-cache`** — Docker's build cache can reuse the `COPY . ./` layer
+> even when source files changed, resulting in a container with stale code.
+
+### 4. Recreate the container — DETACHED + VERIFY (this step prevents the outage)
+
+`docker compose up -d --force-recreate` creates the new container, but the **start step
+can be interrupted** if the SSH client dies on benign stderr (e.g. the `9router-data`
+volume "already exists" warning). That leaves the container in `Created` state — i.e. DOWN.
+So: run it detached, then **always verify it is `Up`**, and recover if it is not.
+
+```bash
+ssh p106-platform 'cd /opt/9router && setsid docker compose up -d --force-recreate 9router > /tmp/9router-up.log 2>&1 < /dev/null &'
+```
+
+> Use `grep`, NOT `docker ps --format` — the `{{ }}` template breaks through SSH quoting.
+
+```bash
+ssh p106-platform 'docker ps | grep 9router-source'
+```
+
+- Shows `Up ...` → done.
+- Shows `Created` (not started) → **recover immediately**:
+
+  ```bash
+  ssh p106-platform 'docker start 9router-source'
+  ssh p106-platform 'docker ps | grep 9router-source'   # must now show Up
+  ```
+
+> The volume warning (`volume "9router-data" already exists ... Use external: true`) is
+> benign. To silence it permanently (and remove the stderr noise that can interrupt the
+> up command), mark the volume `external: true` in `docker-compose.yml` — the `9router-data`
+> volume is pre-created by Docker, not by compose.
+
+### 5. Verify
 
 ```bash
 # New code live?
-ssh p106-platform 'curl -s http://localhost:20130/api/health'
+ssh p106-platform 'curl -s http://localhost:20130/api/health'   # -> {"ok":true}
 
-# Master still up?
-ssh p106-platform 'curl -s http://localhost:20131/api/health'
+# Master still up (fallback must never go down)?
+ssh p106-platform 'curl -s http://localhost:20131/api/health'   # -> {"ok":true}
 
 # Both containers running?
-ssh p106-platform 'docker ps --filter name=9router'
+ssh p106-platform 'docker ps | grep 9router'
 ```
 
-### 5. Check logs for errors
+### 6. Check logs for errors
 
 ```bash
 ssh p106-platform 'docker logs 9router-source --tail 20'
@@ -87,3 +142,10 @@ Or switch traffic to master (port 20131) while debugging.
 - **Always verify master is still up** after rebuilding source
 - **Data volume is shared** — both containers read/write the same `9router-data`
 - **Branch**: `david-dev` is the active development branch for 9router-source
+- **Run build AND up DETACHED** (`setsid ... > log 2>&1 < /dev/null &`) — the build exceeds
+  the 30s SSH client timeout, and a killed client can leave the container unstarted (the
+  exact cause of a past "UAT died" outage where the container was stuck in `Created`)
+- **Always verify `9router-source` is `Up` after recreate**; if it is `Created`,
+  `docker start 9router-source` recovers it. A `Created` container = UAT is down
+- **Do NOT re-launch a build/up the client reported as "timed out"** — it is almost
+  certainly still running on the server; re-launching starts a second competing build
