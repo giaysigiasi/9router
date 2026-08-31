@@ -16,6 +16,11 @@ const HARD_CAPS = new Set(["vision", "pdf", "audioInput", "videoInput"]);
 const TOOL_CALL_PREFIX = "[Called tools: ";
 const TOOL_RESULT_PREFIX = "[Tool result: ";
 
+// Agentic retry loop tunables.
+const BROKEN_MODEL_COOLDOWN_MS = 5 * 60 * 1000;
+const REQUEST_BUDGET_MS = 10_000;
+const PASS_GAP_MS = 1_000;
+
 // Flatten tool turns into prose so panel models keep the context but can't loop
 // on tools: drop the request's tools, turn tool/function results into assistant
 // text, and inline assistant tool_calls names instead of the structured field.
@@ -371,135 +376,108 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   }
   rotatedModels = jumpedModels;
 
-  // All-models-blocked early exit: if every combo model is quota-blocked,
-  // return a single 503 + Retry-After immediately instead of burning N
-  // upstream calls that all 429 then returning a bare 503 with no retry info.
-  // This is the ONLY condition a combo should halt — any single blocked model
-  // (including the combo's best) only sinks to tail; it never stops the combo.
-  if (rotatedModels.length > 0) {
-    const earliest = getEarliestComboBlockExpiry(comboName);
-    const key = comboName || "__default__";
-    const blocked = comboQuotaBlocked.get(key);
-    const blockedCount = blocked ? blocked.size : 0;
-    if (blockedCount >= rotatedModels.length && earliest) {
-      const retryIso = earliest.toISOString();
-      const retryHuman = formatRetryAfter(retryIso);
-      log.warn("COMBO", `All ${rotatedModels.length} combo models quota-limited | retry ${retryHuman}`);
-      return unavailableResponse(503, "All combo models are quota-limited", retryIso, retryHuman);
-    }
-  }
+  // All-models-blocked early exit: handled by the agentic retry loop below.
+  // The loop skips blocked models and waits for the earliest cooldown expiry.
 
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
+  const deadline = Date.now() + REQUEST_BUDGET_MS;
 
-  for (let i = 0; i < rotatedModels.length; i++) {
-    const modelStr = rotatedModels[i];
-    log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
-
-    try {
-      const result = await handleSingleModel(body, modelStr);
-      
-      // Success (2xx) - return response
-      if (result.ok) {
-        log.info("COMBO", `Model ${modelStr} succeeded`);
-        return result;
-      }
-
-      // Extract error info from response
-      let errorText = result.statusText || "";
-      let retryAfter = null;
-      let resetsAtMs = null;
-      try {
-        const errorBody = await result.clone().json();
-        errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
-        retryAfter = errorBody?.retryAfter || null;
-        // Provider-reported precise reset time (e.g. codex resets_at, gemini RetryInfo)
-        resetsAtMs = errorBody?.resetsAtMs || null;
-      } catch {
-        // Ignore JSON parse errors
-      }
-
-      // Track earliest retryAfter across all combo models
-      if (retryAfter && (!earliestRetryAfter || new Date(retryAfter) < new Date(earliestRetryAfter))) {
-        earliestRetryAfter = retryAfter;
-      }
-
-      // Normalize error text to string (Worker-safe)
-      if (typeof errorText !== "string") {
-        try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
-      }
-
-      // Check if should fallback to next model
-      const { shouldFallback, cooldownMs, reason } = checkFallbackError(result.status, errorText);
-
-      if (!shouldFallback) {
-        log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
-        return result;
-      }
-
-      // Quota hit: block this model for the combo's cooldown and jump straight to
-      // the last model, skipping the middle ones for this request. If already on
-      // the last model, no jump — fall through to normal fail handling.
-      // Prefer provider-reported resetsAtMs (precise epoch from codex resets_at,
-      // gemini RetryInfo, etc.) when available. Otherwise fall back to fixed
-      // MAX_RATE_LIMIT_COOLDOWN_MS (30min) which covers hourly free-tier quotas.
-      if (reason === "quota" && i < rotatedModels.length - 1) {
-        let effectiveCooldown = MAX_RATE_LIMIT_COOLDOWN_MS;
-        if (resetsAtMs) {
-          const retryMs = resetsAtMs - Date.now();
-          if (retryMs > 0) effectiveCooldown = retryMs;
+  while (Date.now() < deadline) {
+    let triedAny = false;
+    for (let i = 0; i < rotatedModels.length; i++) {
+      const modelStr = rotatedModels[i];
+      const key = comboName || "__default__";
+      const blocked = comboQuotaBlocked.get(key);
+      if (blocked?.has(modelStr)) {
+        const expiry = blocked.get(modelStr);
+        if (Date.now() < expiry) {
+          log.info("COMBO", `Skipping blocked model ${modelStr} (cooldown ${Math.round((expiry - Date.now()) / 1000)}s left)`);
+          continue;
         }
-        effectiveCooldown = Math.max(effectiveCooldown, 1000); // floor 1s
-
-        markComboModelQuotaBlocked(comboName, modelStr, effectiveCooldown);
-        log.warn("COMBO", `Model ${modelStr} quota-limited, blocking ${effectiveCooldown}ms and jumping to last model`);
+        blocked.delete(modelStr);
+      }
+      triedAny = true;
+      log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
+      try {
+        const result = await handleSingleModel(body, modelStr);
+        if (result.ok) { log.info("COMBO", `Model ${modelStr} succeeded`); return result; }
+        let errorText = result.statusText || "";
+        let retryAfter = null;
+        let resetsAtMs = null;
+        try {
+          const errorBody = await result.clone().json();
+          errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
+          retryAfter = errorBody?.retryAfter || null;
+          resetsAtMs = errorBody?.resetsAtMs || null;
+        } catch {}
+        if (retryAfter && (!earliestRetryAfter || new Date(retryAfter) < new Date(earliestRetryAfter))) earliestRetryAfter = retryAfter;
+        if (typeof errorText !== "string") { try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); } }
+        const { shouldFallback, cooldownMs, reason } = checkFallbackError(result.status, errorText);
+        if (!shouldFallback) { log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status }); return result; }
+        if (reason === "quota") {
+          let effectiveCooldown = MAX_RATE_LIMIT_COOLDOWN_MS;
+          if (resetsAtMs) { const retryMs = resetsAtMs - Date.now(); if (retryMs > 0) effectiveCooldown = retryMs; }
+          effectiveCooldown = Math.max(effectiveCooldown, 1000);
+          markComboModelQuotaBlocked(comboName, modelStr, effectiveCooldown);
+          lastError = errorText || String(result.status);
+          if (!lastStatus) lastStatus = result.status;
+          if (i < rotatedModels.length - 1) {
+            log.warn("COMBO", `Model ${modelStr} quota-limited, blocking ${effectiveCooldown}ms and jumping to last model`);
+            i = rotatedModels.length - 2; continue;
+          }
+          log.warn("COMBO", `Model ${modelStr} quota-limited (last model), blocking ${effectiveCooldown}ms`);
+        }
+        if (cooldownMs && cooldownMs > 0 && cooldownMs <= 5000 && (result.status === 503 || result.status === 502 || result.status === 504)) {
+          log.info("COMBO", `Model ${modelStr} transient ${result.status}, waiting ${cooldownMs}ms before next`);
+          await new Promise(r => setTimeout(r, cooldownMs));
+        }
+        if (reason !== "quota" && result.status >= 400 && result.status < 500 && result.status !== 429 && i < rotatedModels.length - 1) {
+          markComboModelQuotaBlocked(comboName, modelStr, BROKEN_MODEL_COOLDOWN_MS);
+          log.warn("COMBO", `Model ${modelStr} hard failure ${result.status}, blocking ${BROKEN_MODEL_COOLDOWN_MS}ms and jumping to last model`);
+          lastError = errorText || String(result.status);
+          if (!lastStatus) lastStatus = result.status;
+          i = rotatedModels.length - 2; continue;
+        }
         lastError = errorText || String(result.status);
         if (!lastStatus) lastStatus = result.status;
-        i = rotatedModels.length - 2; // loop i++ lands on the final (last) model
-        continue;
+        log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
+      } catch (error) {
+        lastError = error.message || String(error);
+        if (!lastStatus) lastStatus = 500;
+        log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
       }
-
-      // For transient errors (503/502/504), wait for cooldown before falling through
-      // so a briefly-overloaded provider gets a chance to recover rather than being
-      // skipped immediately (fixes: combo falls through on transient 503)
-      if (cooldownMs && cooldownMs > 0 && cooldownMs <= 5000 &&
-          (result.status === 503 || result.status === 502 || result.status === 504)) {
-        log.info("COMBO", `Model ${modelStr} transient ${result.status}, waiting ${cooldownMs}ms before next`);
-        await new Promise(r => setTimeout(r, cooldownMs));
+    }
+    if (!triedAny) {
+      const earliest = getEarliestComboBlockExpiry(comboName);
+      if (earliest) {
+        const waitMs = Math.max(0, earliest.getTime() - Date.now());
+        if (waitMs > 0 && waitMs < REQUEST_BUDGET_MS) {
+          log.info("COMBO", `All models blocked, waiting ${waitMs}ms for earliest cooldown`);
+          await new Promise(r => setTimeout(r, waitMs)); continue;
+        }
+        earliestRetryAfter = earliest.toISOString();
+        lastError = "All combo models are quota-limited"; break;
       }
-
-      // Fallback to next model
-      lastError = errorText || String(result.status);
-      if (!lastStatus) lastStatus = result.status;
-      log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
-    } catch (error) {
-      // Catch unexpected exceptions to ensure fallback continues
-      lastError = error.message || String(error);
-      if (!lastStatus) lastStatus = 500;
-      log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
+      break;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining > PASS_GAP_MS) {
+      log.info("COMBO", `Pass complete, retrying in ${PASS_GAP_MS}ms (${remaining}ms budget left)`);
+      await new Promise(r => setTimeout(r, PASS_GAP_MS));
     }
   }
-
-  // All models failed
-  // Use 503 (Service Unavailable) rather than 406 (Not Acceptable) — 406 implies
-  // the request itself is invalid, but here the providers are simply unavailable
-  // or have no active credentials. 503 is more accurate and retryable by clients.
   const allDisabled = lastError && lastError.toLowerCase().includes("no credentials");
-  const status = allDisabled ? 503 : (lastStatus || 503);
+  const status = 503; // Always 503 when agentic loop exhausts budget
   const msg = lastError || "All combo models unavailable";
-
   if (earliestRetryAfter) {
     const retryHuman = formatRetryAfter(earliestRetryAfter);
     log.warn("COMBO", `All models failed | ${msg} (${retryHuman})`);
     return unavailableResponse(status, msg, earliestRetryAfter, retryHuman);
   }
-
   log.warn("COMBO", `All models failed | ${msg}`);
-  return new Response(
-    JSON.stringify({ error: { message: msg } }),
-    { status, headers: { "Content-Type": "application/json" } }
-  );
+  return new Response(JSON.stringify({ error: { message: msg } }), { status, headers: { "Content-Type": "application/json" } });
 }
 
 /**

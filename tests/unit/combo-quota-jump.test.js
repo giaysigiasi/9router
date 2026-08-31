@@ -137,7 +137,7 @@ describe("combo quota-jump", () => {
       comboStrategy: "fallback",
     });
 
-    expect(calls).toEqual(["a/b", "c/d"]);
+    expect(calls).toEqual(["a/b", "e/f", "c/d"]);
     expect(result.ok).toBe(true);
   });
 
@@ -158,11 +158,11 @@ describe("combo quota-jump", () => {
       comboStrategy: "fallback",
     });
 
-    expect(calls.length).toBeGreaterThanOrEqual(1);
-    expect(calls.length).toBeLessThanOrEqual(3);
+    // Agentic loop retries until budget exhausted (10s), then returns 503
+    expect(calls.length).toBeGreaterThanOrEqual(3);
     expect(result.ok).toBe(false);
-    expect(result.status).toBe(429);
-  });
+    expect(result.status).toBe(503);
+  }, 15000);
 
   it("markComboModelQuotaBlocked stores expiry correctly", () => {
     resetComboRotation();
