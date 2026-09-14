@@ -3,7 +3,8 @@ import { getCombos, getProviderConnections, getProviderNodes } from "@/lib/local
 import { getCombosHealth } from "@/lib/comboHealth";
 import { pingModelByKind } from "@/app/api/models/test/ping";
 import { makeKv } from "@/lib/db/helpers/kvStore";
-import { markComboModelQuotaBlocked } from "open-sse/services/combo.js";
+import { markComboModelQuotaBlocked, getComboModelTiers } from "open-sse/services/combo.js";
+import { checkFallbackError } from "open-sse/services/accountFallback.js";
 import registryProviders from "open-sse/providers/registry";
 
 export const dynamic = "force-dynamic";
@@ -42,13 +43,18 @@ export async function GET() {
       }
     }
     const health = getCombosHealth(combos, connections, providerNodeMap);
-    // Attach cached probe data (with staleness flag)
+    // Attach cached probe data (with staleness flag) and runtime tier status
     const now = Date.now();
     for (const h of health) {
       const probe = cachedProbes[h.id];
       if (probe) {
         h.probe = probe;
         h.probeStale = !probe.checkedAt || (now - new Date(probe.checkedAt).getTime()) > PROBE_STALE_MS;
+      }
+      // Runtime tier status from request-path cooldown state (single source of truth)
+      const combo = combos.find((c) => c.id === h.id);
+      if (combo && Array.isArray(combo.models)) {
+        h.modelTiers = getComboModelTiers(combo.name, combo.models);
       }
     }
     return NextResponse.json({
@@ -62,7 +68,26 @@ export async function GET() {
   }
 }
 
-const DEGRADE_COOLDOWN_MS = 15 * 60 * 1000; // 15 min auto-push-to-tail
+// Probe cooldown tiers — maps error classification to auto-push-to-tail duration.
+const PROBE_COOLDOWN = {
+  quota:   15 * 60 * 1000,  // rate-limit / quota: 15 min (provider may need time)
+  other:    5 * 60 * 1000,  // auth / hard failure: 5 min (config issue, not transient)
+  transient: 2 * 60 * 1000, // unknown / connection: 2 min (likely transient)
+};
+
+/**
+ * Classify a probe result and return the appropriate cooldown duration (ms)
+ * or 0 if the probe should NOT block the model (e.g. transient on a GET probe).
+ */
+function classifyProbeCooldown(status, errorText) {
+  if (status == null) {
+    // Connection-level failure (DNS, timeout, fetch threw) — treat as transient.
+    return PROBE_COOLDOWN.transient;
+  }
+  const { cooldownMs, reason } = checkFallbackError(status, errorText || "");
+  if (!cooldownMs || cooldownMs <= 0) return 0;
+  return PROBE_COOLDOWN[reason] ?? PROBE_COOLDOWN.transient;
+}
 
 export async function POST() {
   try {
@@ -77,12 +102,17 @@ export async function POST() {
           const modelProbes = await Promise.all(combo.models.map(async (m) => {
             try {
               const r = await pingModelByKind(m, "chat");
-              return { model: m, ok: r.ok };
-            } catch { return { model: m, ok: false }; }
+              return { model: m, ok: r.ok, status: r.status ?? null, error: r.error ?? null };
+            } catch { return { model: m, ok: false, status: null, error: "probe threw" }; }
           }));
+          const pushedToTail = [];
           for (const mp of modelProbes) {
             if (!mp.ok) {
-              markComboModelQuotaBlocked(combo.name, mp.model, DEGRADE_COOLDOWN_MS);
+              const cooldownMs = classifyProbeCooldown(mp.status, mp.error);
+              if (cooldownMs > 0) {
+                markComboModelQuotaBlocked(combo.name, mp.model, cooldownMs);
+                pushedToTail.push(mp.model);
+              }
             }
           }
           return {
@@ -93,7 +123,7 @@ export async function POST() {
             error: result.error,
             checkedAt: new Date().toISOString(),
             modelProbes: modelProbes.map(mp => ({ model: mp.model, ok: mp.ok })),
-            autoPushedToTail: modelProbes.filter(mp => !mp.ok).map(mp => mp.model),
+            autoPushedToTail: pushedToTail,
           };
         }
         return {

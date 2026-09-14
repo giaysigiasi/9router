@@ -7,6 +7,7 @@ import { getCombosHealth } from "@/lib/comboHealth";
 import { pingModelByKind } from "@/app/api/models/test/ping";
 import { makeKv } from "@/lib/db/helpers/kvStore";
 import { markComboModelQuotaBlocked } from "open-sse/services/combo.js";
+import { checkFallbackError } from "open-sse/services/accountFallback.js";
 import registryProviders from "open-sse/providers/registry";
 
 const probesKv = makeKv("comboHealth");
@@ -14,7 +15,26 @@ const probesKv = makeKv("comboHealth");
 /** Poll interval: 2 hours (configurable via COMBO_HEALTH_POLL_MS env). */
 const POLL_INTERVAL_MS = Number(process.env.COMBO_HEALTH_POLL_MS) || 2 * 60 * 60 * 1000;
 const INITIAL_DELAY_MS = 30 * 1000; // 30s after boot
-const DEGRADE_COOLDOWN_MS = 15 * 60 * 1000;
+
+// Probe cooldown tiers — maps error classification to auto-push-to-tail duration.
+const PROBE_COOLDOWN = {
+  quota:     15 * 60 * 1000,  // rate-limit / quota: 15 min
+  other:      5 * 60 * 1000,  // auth / hard failure: 5 min
+  transient:  2 * 60 * 1000,  // unknown / connection: 2 min
+};
+
+/**
+ * Classify a probe result and return the appropriate cooldown duration (ms)
+ * or 0 if the probe should NOT block the model.
+ */
+function classifyProbeCooldown(status, errorText) {
+  if (status == null) {
+    return PROBE_COOLDOWN.transient;
+  }
+  const { cooldownMs, reason } = checkFallbackError(status, errorText || "");
+  if (!cooldownMs || cooldownMs <= 0) return 0;
+  return PROBE_COOLDOWN[reason] ?? PROBE_COOLDOWN.transient;
+}
 
 let started = false;
 let intervalHandle = null;
@@ -72,18 +92,27 @@ async function tick() {
         const degraded = !result.ok;
         if (degraded && Array.isArray(combo.models)) {
           const modelProbes = await Promise.all(combo.models.map(async (m) => {
-            try { const r = await pingModelByKind(m, "chat"); return { model: m, ok: r.ok }; }
-            catch { return { model: m, ok: false }; }
+            try {
+              const r = await pingModelByKind(m, "chat");
+              return { model: m, ok: r.ok, status: r.status ?? null, error: r.error ?? null };
+            } catch { return { model: m, ok: false, status: null, error: "probe threw" }; }
           }));
+          const pushedToTail = [];
           for (const mp of modelProbes) {
-            if (!mp.ok) markComboModelQuotaBlocked(combo.name, mp.model, DEGRADE_COOLDOWN_MS);
+            if (!mp.ok) {
+              const cooldownMs = classifyProbeCooldown(mp.status, mp.error);
+              if (cooldownMs > 0) {
+                markComboModelQuotaBlocked(combo.name, mp.model, cooldownMs);
+                pushedToTail.push(mp.model);
+              }
+            }
           }
           return {
             id: combo.id, name: combo.name, status: "degraded",
             latencyMs: result.latencyMs, error: result.error,
             checkedAt: new Date().toISOString(),
             modelProbes: modelProbes.map(mp => ({ model: mp.model, ok: mp.ok })),
-            autoPushedToTail: modelProbes.filter(mp => !mp.ok).map(mp => mp.model),
+            autoPushedToTail: pushedToTail,
           };
         }
         return {

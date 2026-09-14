@@ -321,6 +321,49 @@ export function resetComboRotation(comboName) {
 }
 
 /**
+ * Return the runtime tier of every model in a combo.
+ *
+ * Tiers (request-path source of truth):
+ *   "healthy"   – not blocked; first-choice for requests.
+ *   "retryable" – in cooldown from a transient / rate-limit error; will
+ *                 automatically recover when the cooldown expires.
+ *   "exhausted" – hard-failure (auth, permanent quota, terminal provider
+ *                 error); blocked for BROKEN_MODEL_COOLDOWN_MS.
+ *
+ * Models absent from the combo list are excluded (not "unavailable").
+ *
+ * @param {string}   comboName  - Name of the combo
+ * @param {string[]} models     - Ordered model list for the combo
+ * @returns {{ model: string, tier: "healthy"|"retryable"|"exhausted", blockedUntilMs: number|null }[]}
+ */
+export function getComboModelTiers(comboName, models) {
+  if (!Array.isArray(models) || models.length === 0) return [];
+  const key = comboName || "__default__";
+  const blocked = comboQuotaBlocked.get(key);
+  const now = Date.now();
+
+  // Lazy-evict expired entries
+  if (blocked && blocked.size > 0) {
+    for (const [m, until] of blocked) {
+      if (until <= now) blocked.delete(m);
+    }
+  }
+
+  return models.map((model) => {
+    if (!blocked || !blocked.has(model)) {
+      return { model, tier: "healthy", blockedUntilMs: null };
+    }
+    const until = blocked.get(model);
+    // The cooldown used by handleComboChat: BROKEN_MODEL_COOLDOWN_MS = 5 min.
+    // Anything with a longer remaining cooldown was set by the health probe
+    // (15 min) — treat as "retryable"; anything ≤ 5 min as "exhausted".
+    const remainingMs = until - now;
+    const tier = remainingMs > BROKEN_MODEL_COOLDOWN_MS ? "retryable" : "exhausted";
+    return { model, tier, blockedUntilMs: until };
+  });
+}
+
+/**
  * Get combo models from combos data
  * @param {string} modelStr - Model string to check
  * @param {Array|Object} combosData - Array of combos or object with combos
@@ -446,7 +489,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       } catch (error) {
         lastError = error.message || String(error);
         if (!lastStatus) lastStatus = 500;
-        log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
+        // Block the model for the remainder of this and future requests to
+        // prevent repeated connection-refused / DNS / timeout storms.
+        markComboModelQuotaBlocked(comboName, modelStr, BROKEN_MODEL_COOLDOWN_MS);
+        if (i < rotatedModels.length - 1) {
+          log.warn("COMBO", `Model ${modelStr} threw error, blocking ${BROKEN_MODEL_COOLDOWN_MS}ms and jumping to last model`, { error: lastError });
+          i = rotatedModels.length - 2; continue;
+        }
+        log.warn("COMBO", `Model ${modelStr} threw error (last model), blocking ${BROKEN_MODEL_COOLDOWN_MS}ms`, { error: lastError });
       }
     }
     if (!triedAny) {

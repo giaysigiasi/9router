@@ -5,6 +5,7 @@ import {
   markComboModelQuotaBlocked,
   getEarliestComboBlockExpiry,
   resetComboRotation,
+  getComboModelTiers,
 } from "../../open-sse/services/combo.js";
 import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
 
@@ -390,5 +391,140 @@ describe("combo quota-jump", () => {
     // Blocks expired — combo should proceed normally
     expect(calls.length).toBeGreaterThan(0);
     expect(result.ok).toBe(true);
+  });
+});
+
+// ─── Exception cooldown ────────────────────────────────────────────────────
+
+describe("exception cooldown", () => {
+  beforeEach(() => {
+    resetComboRotation();
+  });
+
+  it("thrown error blocks the model and jumps to last", async () => {
+    const models = ["a/b", "c/d", "e/f"];
+    const log = createLog();
+    const calls = [];
+
+    const result = await handleComboChat({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      models,
+      handleSingleModel: async (_body, model) => {
+        calls.push(model);
+        if (model === "a/b") throw new Error("ECONNREFUSED");
+        if (model === "e/f") return makeResponse(200, { choices: [{ message: { content: "ok" } }] });
+        return makeResponse(500);
+      },
+      log,
+      comboName: "excep-combo",
+      comboStrategy: "fallback",
+    });
+
+    // a/b threw → blocked + jumped to last (e/f)
+    expect(calls).toEqual(["a/b", "e/f"]);
+    expect(result.ok).toBe(true);
+
+    // a/b should now be blocked in the quota map
+    const tier = getComboModelTiers("excep-combo", models);
+    expect(tier.find(t => t.model === "a/b").tier).toBe("exhausted");
+  });
+
+  it("all models thrown → 503 with all blocked", async () => {
+    const models = ["a/b", "c/d"];
+    const log = createLog();
+
+    const result = await handleComboChat({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      models,
+      handleSingleModel: async () => { throw new Error("network down"); },
+      log,
+      comboName: "all-excep",
+      comboStrategy: "fallback",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(503);
+  });
+
+  it("thrown error blocked model stays on subsequent request", async () => {
+    const models = ["a/b", "c/d"];
+    const log = createLog();
+
+    // First request: a/b throws
+    await handleComboChat({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      models,
+      handleSingleModel: async (_body, model) => {
+        if (model === "a/b") throw new Error("ECONNREFUSED");
+        return makeResponse(200, { choices: [{ message: { content: "ok" } }] });
+      },
+      log,
+      comboName: "excep-persist",
+      comboStrategy: "fallback",
+    });
+
+    // Second request: a/b still blocked, starts from c/d
+    const calls = [];
+    await handleComboChat({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      models,
+      handleSingleModel: async (_body, model) => {
+        calls.push(model);
+        return makeResponse(200, { choices: [{ message: { content: "ok" } }] });
+      },
+      log,
+      comboName: "excep-persist",
+      comboStrategy: "fallback",
+    });
+
+    // a/b should be skipped (blocked), starts from c/d
+    expect(calls).toEqual(["c/d"]);
+  });
+});
+
+// ─── getComboModelTiers ───────────────────────────────────────────────────
+
+describe("getComboModelTiers", () => {
+  beforeEach(() => {
+    resetComboRotation();
+  });
+
+  it("returns all healthy when nothing is blocked", () => {
+    const tiers = getComboModelTiers("clean", ["a/b", "c/d"]);
+    expect(tiers).toEqual([
+      { model: "a/b", tier: "healthy", blockedUntilMs: null },
+      { model: "c/d", tier: "healthy", blockedUntilMs: null },
+    ]);
+  });
+
+  it("returns retryable for long cooldown (probe-set) and exhausted for short", () => {
+    // Simulate probe-set block: 15 min
+    markComboModelQuotaBlocked("tier-test", "a/b", 15 * 60 * 1000);
+    // Simulate runtime block: 5 min (BROKEN_MODEL_COOLDOWN_MS)
+    markComboModelQuotaBlocked("tier-test", "c/d", 5 * 60 * 1000);
+
+    const tiers = getComboModelTiers("tier-test", ["a/b", "c/d", "e/f"]);
+    expect(tiers[0].model).toBe("a/b");
+    expect(tiers[0].tier).toBe("retryable");
+    expect(tiers[0].blockedUntilMs).toBeTypeOf("number");
+
+    expect(tiers[1].model).toBe("c/d");
+    expect(tiers[1].tier).toBe("exhausted");
+
+    expect(tiers[2].model).toBe("e/f");
+    expect(tiers[2].tier).toBe("healthy");
+  });
+
+  it("returns empty array for empty/null models", () => {
+    expect(getComboModelTiers("x", [])).toEqual([]);
+    expect(getComboModelTiers("x", null)).toEqual([]);
+  });
+
+  it("evicts expired blocks before classifying", async () => {
+    markComboModelQuotaBlocked("expired-tier", "a/b", 30);
+    await new Promise(r => setTimeout(r, 40));
+
+    const tiers = getComboModelTiers("expired-tier", ["a/b"]);
+    expect(tiers[0].tier).toBe("healthy");
   });
 });

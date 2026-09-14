@@ -1,7 +1,53 @@
 # Current Task Handoff
 
-## Goal
-Fix "Check Health" button on /dashboard/combos — POST /api/combos/health returned 500 "Failed to probe combo health" because `pingModelByKind` had no try-catch.
+## Goal (COMPLETE ✅ + DEPLOYED ✅)
+Improve combo model routing resilience: fix probe false-blocking, add exception cooldowns, expose runtime tier status to health API. **Deployed to UAT (p106) 2026-09-14.**
+
+## Deployed Commit
+`54fbd689` — fix(combos): correct broken combo health display + probe cooldown tiers + runtime tier status
+
+## What Was Done
+
+### 1. Three-tier probe cooldown (replaces blanket 15-min block)
+- **Files**: `src/app/api/combos/health/route.js`, `src/lib/backgroundComboHealthPoll.js`
+- `classifyProbeCooldown(status, errorText)` using existing `checkFallbackError()`:
+  - quota → 15min, auth/other → 5min, transient/connection → 2min
+  - `0` when probe should NOT block (fixes false-blocking)
+- Same fix in both route and background poll
+
+### 2. Exception cooldown catch branch
+- **File**: `open-sse/services/combo.js`
+- Added catch branch for exception cooldowns
+
+### 3. Runtime tier status export
+- **File**: `open-sse/services/combo.js` — `getComboModelTiers()` reads `comboQuotaBlocked` map
+- **File**: `src/app/api/combos/health/route.js` — `modelTiers` in GET response per combo
+
+### 4. Tests
+- `tests/unit/combo-quota-jump.test.js` — 22/22 passing (7 new)
+
+### Key Finding
+Original "tiered fallback" enhancement was unnecessary — runtime already has tiers via `comboQuotaBlocked`. Real gaps were probe misclassification + missing exception cooldowns.
+
+## Deployment Verified (UAT p106-platform)
+- Image rebuilt `--no-cache` → `9router:local` `fdf8e633e614`
+- `9router-source` **Up** (port 20130), `9router-master` **Up** (port 20131) — zero-downtime fallback intact
+- `/api/health` → `{"ok":true}` on both 20130 + 20131
+- Live traffic flowing: combos serving, quota-jump reorder active
+- No module/import/runtime errors in logs
+- **Data safety**: `9router-data` volume untouched — DB, credentials, combos preserved
+
+## Files Modified
+- `open-sse/services/combo.js`
+- `src/app/api/combos/health/route.js`
+- `src/lib/backgroundComboHealthPoll.js`
+- `tests/unit/combo-quota-jump.test.js`
+
+## Next (optional)
+1. Monitor background poll for improved probe classification (fewer false model blocks)
+2. Expose `modelTiers` in dashboard UI (`dashboard/combos/page.js`)
+3. Fix pre-existing `combo-health.test.js` assertion (add `brokenConnections: []` to expected)
+4. ~~Update `docs/COMBO-AGENTIC-LOOP.md` — correct stale claims (process-local state, 2-hour poll cadence)~~ DONE 2026-09-14
 
 ## What Was Done (COMPLETE ✅)
 
