@@ -119,6 +119,27 @@ Default URLs:
 - Dashboard: `http://localhost:20128/dashboard`
 - OpenAI-compatible API: `http://localhost:20128/v1`
 
+### Local Docker dev + combo health smoke
+
+For combo health work, use `docker-compose.yml` to run 9Router on port `20130` and Headroom on `8788`.
+
+```bash
+docker compose up --build -d
+curl http://localhost:20130/api/health
+node scripts/test-combo-local.mjs --json --csv
+```
+
+The script builds/starts the stack, waits for `/api/health`, lists combos, checks `/api/combos/health`, optionally posts live probes, then tears down with `docker compose down -v`.
+
+Flags:
+
+- `--json` / `--csv` — write reports
+- `--probe` — also POST live probes
+- `--source-only` — skip Docker, run source-level checks only
+- `--no-down` — leave stack running after the run
+
+`BASE_URL` and `API_KEY` are optional environment overrides.
+
 ---
 
 ## Video Guides

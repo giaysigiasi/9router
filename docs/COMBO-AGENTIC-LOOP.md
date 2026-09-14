@@ -140,6 +140,11 @@ Server boot → 30s delay → start polling
   merged results → comboHealth KV  (for GET /combos/health)
 ```
 
+### Local smoke test
+
+Use `node scripts/test-combo-local.mjs --source-only` for cooldown + all-blocked checks.
+Use the default command for a full Docker/API smoke run.
+
 ---
 
 ## Model Role Tagging

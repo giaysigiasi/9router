@@ -90,4 +90,10 @@ graphify-out/*
 .codegraph/
 .PR/
 .next-analyze/*
-*.tar  
+*.tar
+# Local smoke test artifacts
+build.log
+test-combo-local-report.*
+combos*.json
+combos*.csv
+combos-health.json

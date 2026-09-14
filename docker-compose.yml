@@ -1,3 +1,8 @@
+﻿# 9Router local dev stack.
+# Build:  docker compose build
+# Up:     docker compose up -d
+# Logs:   docker compose logs -f
+# Down:   docker compose down -v
 services:
   9router:
     build:
@@ -5,7 +10,7 @@ services:
       dockerfile: Dockerfile
     image: 9router:local
     container_name: 9router-source
-    restart: always
+    restart: unless-stopped
     ports:
       - "20130:20130"
     volumes:
@@ -18,15 +23,16 @@ services:
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
       HEADROOM_URL: http://headroom:8787
+      COMBO_HEALTH_POLL_MS: "7200000"
     depends_on:
       - headroom
 
   headroom:
     image: ghcr.io/chopratejas/headroom:latest
     container_name: headroom
-    restart: always
+    restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "8788:8787"
 
 volumes:
   9router-data:

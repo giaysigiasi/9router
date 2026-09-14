@@ -168,6 +168,14 @@ node scripts/build-cli-combos.mjs --apply --roles pm,ba,dev,qa,supervisor
 - `codex-qa` — reasoning models
 - `codex-supervisor` — top-tier reasoning models only (strengthScore ≥ 3)
 
+## Current Task Handoff — local combo smoke script
+- **Done**: added `scripts/test-combo-local.mjs` with Docker build/start, health wait, combo listing, health introspection, optional live probes, source-level cooldown checks, teardown, and JSON/CSV reports.
+- **Done**: added `scripts/lib/probe-cooldown.mjs` with `PROBE_COOLDOWN` and `classifyProbeCooldown()`.
+- **Done**: source-only run passed `9/9` checks.
+- **Done**: added `.github/workflows/combo-health-smoke.yml` for `main` push CI smoke.
+- **Done**: README + `docs/COMBO-AGENTIC-LOOP.md` now document local Docker dev and smoke-test flags.
+- **Next**: verify final diff, commit selected files, push to `origin/david-dev`.
+
 ## Next
 1. Run `--list --roles pm,ba,dev,qa,supervisor` on host to see per-role candidate pools
 2. Tune ROLE_PROFILES thresholds if needed
