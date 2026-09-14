@@ -175,6 +175,8 @@ node scripts/build-cli-combos.mjs --apply --roles pm,ba,dev,qa,supervisor
 - **Done**: added `.github/workflows/combo-health-smoke.yml` for `main` push CI smoke.
 - **Done**: README + `docs/COMBO-AGENTIC-LOOP.md` now document local Docker dev and smoke-test flags.
 - **Next**: verify final diff, commit selected files, push to `origin/david-dev`.
+- **Done**: committed `3c18675d` and pushed to `origin/david-dev` (8 files).
+- **Done**: rebuilt Docker image with `docker compose build --no-cache`, recreated services, and verified `/api/health` returns `{"ok":true}`.
 
 ## Next
 1. Run `--list --roles pm,ba,dev,qa,supervisor` on host to see per-role candidate pools
