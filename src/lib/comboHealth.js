@@ -5,7 +5,15 @@ function providerIdFromModel(model) {
 }
 
 function connectionCanRoute(connection) {
-  return connection?.isActive && Boolean(connection.apiKey || connection.accessToken);
+  if (!connection?.isActive) return false;
+  if (!connection.apiKey && !connection.accessToken) return false;
+  // Exclude connections whose live test revealed a terminal error.
+  // null / undefined = never tested → still considered routable.
+  // "active" = confirmed working.
+  // "error" | "unavailable" = confirmed broken → mark as unable to route.
+  const status = connection.testStatus;
+  if (status && status !== "active") return false;
+  return true;
 }
 
 /**
@@ -37,15 +45,33 @@ function buildReverseNodeMap(providerNodeMap) {
 export function getComboHealth(combo, connections = [], providerNodeMap = null) {
   const models = Array.isArray(combo?.models) ? combo.models.filter(Boolean) : [];
   if (models.length === 0) {
-    return { status: "no-models", readyModels: 0, totalModels: 0, unavailableModels: [] };
+    return { status: "no-models", readyModels: 0, totalModels: 0, unavailableModels: [], brokenConnections: [] };
   }
 
   // Build set of ready provider identifiers from active connections.
   // Resolve each connection.provider through providerNodeMap so both the raw
   // ID (e.g. "kilo-gateway") and its canonical alias (e.g. "kgw") are marked ready.
   const readyProviders = new Set();
+  // Track connections that exist but can't route (for diagnostic display).
+  const brokenConnections = [];
   for (const conn of connections) {
-    if (!connectionCanRoute(conn)) continue;
+    if (!connectionCanRoute(conn)) {
+      // Only include connections relevant to this combo's models
+      const providerPrefix = conn.provider || "";
+      const hasRelevantModel = models.some((m) => {
+        const p = providerIdFromModel(m);
+        const resolved = resolveProviderForHealth(p, providerNodeMap);
+        return resolved === providerPrefix || p === providerPrefix;
+      });
+      if (hasRelevantModel) {
+        brokenConnections.push({
+          provider: providerPrefix,
+          testStatus: conn.testStatus || null,
+          lastError: conn.lastError || null,
+        });
+      }
+      continue;
+    }
     const raw = conn.provider;
     readyProviders.add(raw);
     // Resolve to canonical if providerNodeMap has it
@@ -76,6 +102,7 @@ export function getComboHealth(combo, connections = [], providerNodeMap = null) 
     readyModels,
     totalModels: models.length,
     unavailableModels,
+    brokenConnections,
   };
 }
 

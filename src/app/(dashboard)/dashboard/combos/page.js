@@ -179,6 +179,30 @@ export default function CombosPage() {
     }
   };
 
+  // Probe a single combo via health endpoint (reuses the same POST /api/combos/health)
+  const handleProbeSingle = async (comboId) => {
+    try {
+      const res = await fetch("/api/combos/health", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to probe");
+      const probe = (data.probes || []).find((p) => p.id === comboId);
+      if (probe) {
+        setComboProbes((prev) => ({ ...prev, [comboId]: probe }));
+      }
+      // Refresh health data for the stale flag
+      try {
+        const healthRes = await fetch("/api/combos/health");
+        if (healthRes.ok) {
+          const healthData = await healthRes.json();
+          setComboHealth(Object.fromEntries((healthData.health || []).map((item) => [item.id, item])));
+          setLastPollAt(healthData.lastPollAt || null);
+        }
+      } catch (_) { /* ignore */ }
+    } catch (error) {
+      console.error("Probe failed:", error);
+    }
+  };
+
   const handleSetCapacityAdapter = async (next) => {
     setCapacityAdapter(next);
     try {
@@ -321,6 +345,11 @@ export default function CombosPage() {
     [comboHealth],
   );
 
+  const staleProbeCount = useMemo(
+    () => Object.values(comboHealth).filter((h) => h.probeStale).length,
+    [comboHealth],
+  );
+
   const sortedCombos = useMemo(() => {
     if (sortMode === "default") return combos;
     return [...combos].sort((a, b) => {
@@ -374,6 +403,12 @@ export default function CombosPage() {
                 Last: {new Date(lastPollAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             )}
+            {staleProbeCount > 0 && (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap" title={`${staleProbeCount} combo probe(s) are older than 5 minutes`}>
+                <span className="material-symbols-outlined text-[12px] align-middle mr-0.5">schedule</span>
+                {staleProbeCount} stale
+              </span>
+            )}
           </div>
           <Button icon="add" onClick={() => setShowCreateModal(true)} className="flex-1 whitespace-nowrap sm:flex-none">
             Create Combo
@@ -424,6 +459,7 @@ export default function CombosPage() {
                onFix={() => handleFixCombo(combo.id)}
                fixing={fixingComboId === combo.id}
                fixResult={fixResults[combo.id]}
+               onProbe={() => handleProbeSingle(combo.id)}
             />
           ))}
         </div>
@@ -478,10 +514,21 @@ function ProbeBadge({ probe, probeStale }) {
   const stale = probeStale !== false;
   const base = "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium";
   const hasAutoPush = Array.isArray(probe.autoPushedToTail) && probe.autoPushedToTail.length > 0;
+
+  // Compute relative time from checkedAt for stale probes
+  let staleLabel = "";
+  if (stale && probe.checkedAt) {
+    const elapsed = Date.now() - new Date(probe.checkedAt).getTime();
+    if (elapsed > 86400000) staleLabel = `${Math.floor(elapsed / 86400000)}d ago`;
+    else if (elapsed > 3600000) staleLabel = `${Math.floor(elapsed / 3600000)}h ago`;
+    else if (elapsed > 60000) staleLabel = `${Math.floor(elapsed / 60000)}m ago`;
+    else staleLabel = "just now";
+  }
+
   if (probe.status === "healthy") {
     return (
-      <span className={`${base} ${stale ? "bg-emerald-500/5 text-emerald-600/60 dark:text-emerald-400/60" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`} title={`Live check: ${probe.latencyMs}ms${stale ? " (stale)" : ""}`}>
-        {stale ? "⚡" : "✓"} {probe.latencyMs}ms{stale ? " ~" : ""}
+      <span className={`${base} ${stale ? "bg-emerald-500/5 text-emerald-600/60 dark:text-emerald-400/60" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`} title={`Live check: ${probe.latencyMs}ms${stale ? ` (stale, ${staleLabel})` : ""}`}>
+        {stale ? "⚡" : "✓"} {probe.latencyMs}ms{stale ? ` ${staleLabel}` : ""}
       </span>
     );
   }
@@ -513,12 +560,13 @@ function ComboHealthBadge({ health }) {
     unavailable: "Unavailable",
     "no-models": "No models",
   };
+  const brokenCount = health.brokenConnections?.length || 0;
   return (
     <span
       className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${styles[health.status] || styles.unavailable}`}
-      title={`${health.readyModels}/${health.totalModels} configured models can route`}
+      title={`${health.readyModels}/${health.totalModels} configured models can route${brokenCount ? ` — ${brokenCount} broken connection(s)` : ""}`}
     >
-      {labels[health.status] || "Unavailable"} {health.totalModels ? `${health.readyModels}/${health.totalModels}` : ""}
+      {labels[health.status] || "Unavailable"} {health.totalModels ? `${health.readyModels}/${health.totalModels}` : ""}{brokenCount ? ` ⚠${brokenCount}` : ""}
     </span>
   );
 }
@@ -529,7 +577,7 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy, onFix, fixing, fixResult }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy, onFix, fixing, fixResult, onProbe }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
@@ -602,6 +650,21 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
               )}
             </div>
+            {/* Broken connection diagnostics */}
+            {health?.brokenConnections?.length > 0 && (
+              <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">
+                {health.brokenConnections.map((bc, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded bg-red-500/8 px-1.5 py-0.5 text-[10px] text-red-600 dark:text-red-400 dark:bg-red-500/10"
+                    title={bc.lastError ? `${bc.provider}: ${bc.lastError}` : `${bc.provider}: ${bc.testStatus || "no credentials"}`}
+                  >
+                    <span className="material-symbols-outlined text-[11px]">link_off</span>
+                    {bc.provider}{bc.lastError ? `: ${bc.lastError.slice(0, 30)}` : ` (${bc.testStatus || "no key"})`}
+                  </span>
+                ))}
+              </div>
+            )}
             {/* Fusion: judge picker (Auto = first model) */}
             {isFusion && (
               <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
@@ -640,7 +703,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-1 sm:flex">
+          <div className="grid grid-cols-4 gap-1 sm:flex">
             <button
               onClick={(e) => { e.stopPropagation(); onCopy(combo.name, `combo-${combo.id}`); }}
               className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
@@ -678,6 +741,16 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
                   {fixing ? "hourglass_empty" : "auto_fix_high"}
                 </span>
                 <span className="text-[10px] leading-tight">{fixing ? "Fixing..." : "Fix"}</span>
+              </button>
+            )}
+            {onProbe && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onProbe(); }}
+                className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+                title="Re-probe this combo"
+              >
+                <span className="material-symbols-outlined text-[18px]">refresh</span>
+                <span className="text-[10px] leading-tight">Probe</span>
               </button>
             )}
           </div>
