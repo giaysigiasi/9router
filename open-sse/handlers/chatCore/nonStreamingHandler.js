@@ -371,6 +371,10 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   reqLogger.logConvertedResponse(translatedResponse);
 
   const totalLatency = Date.now() - requestStartTime;
+  const usage = extractUsageFromResponse(responseBody);
+  if (!usage || !hasValidUsage(usage)) {
+    usage = estimateUsage(body, translatedResponse?.choices?.[0]?.message?.content?.length || 0);
+  }
   saveRequestDetail(buildRequestDetail({
     provider, model, connectionId,
     latency: { ttft: totalLatency, total: totalLatency },
