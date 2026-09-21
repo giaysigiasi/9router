@@ -1,5 +1,45 @@
 # Current Task Handoff
 
+## Current Task — Combo-count simplification (Solution 2 + 3) — IMPLEMENTED, NOT DEPLOYED
+Cut 83 LLM combos toward a canonical set by making duplicate model-sets visible and prunable from the dashboard.
+
+### Audit findings (live UAT http://192.168.1.33:20130, session-cookie auth via `POST /api/auth/login`)
+- 83 LLM combos. 4 model lists are shared by 2+ combos (exact ordered match):
+  - 24 models × 10 combos: `free-coding-max`, `free-reasoning`, `1/2/3-coding-max`, `1/2/3-reasoning`, `primary-coding-max`, `primary-reasoning`
+  - 16 models × 12 combos: `codex|claude|opencode|cline` × `pm|ba|qa`
+  - 16 models × 8 combos: same 4 CLIs × `dev|supervisor`
+  - 5 models × 2 combos: `paid-plan-balanced`, `paid-act-balanced`
+- Usage DB records the *resolved* provider/model, not the combo name (`/api/usage/logs`, `/api/usage/request-logs`, `/api/usage/stats` byModel) → combo-level usage cannot be proven from the API. `meta` column unverified.
+- Only in-repo client dependency on legacy names: `agent-ai/orchestrator/config.js` used `1-reasoning`/`1-coding-max`/`2-reasoning` → repointed to canonical names.
+- **No combos deleted.** Deletion is irreversible and external CLI configs may still call legacy names; the operator now does it from the UI with a keeper picker.
+
+### What was built
+- `src/lib/combos/duplicateGroups.js` — pure logic (signature, legacy-name heuristic, grouping, prune plan, delete gate).
+- `src/app/api/combos/duplicates/route.js` — `GET` report; `POST { confirm: true, names, keepNames }` delete. Refuses to empty a group, rejects names that aren't duplicates.
+- `src/app/(dashboard)/dashboard/combos/page.js` — `Duplicate set ×K` badge per card, header `Duplicates (N)` button, modal with per-set checkbox + keeper radio, delete count in the confirm button.
+- `tests/unit/combos-duplicate-groups.test.js` — 11/11 passing.
+- `agent-ai/orchestrator/config.js` — canonical combo names.
+- `docs/combos-ui-improvements.md` — section 6 + API reference.
+
+### Verification
+- `npx vitest run unit/combos-duplicate-groups.test.js` → 11 passed.
+- Live 83-combo snapshot fed through `buildPrunePlan` → 4 groups, 8 auto-deletable legacy aliases, no keeper lost.
+- ESLint on the new route + helper → clean; page.js reports only the 3 pre-existing errors (lines 126 / 664 / 1221).
+- acorn+jsx parse of all touched JS/JSX files → OK.
+
+### Next Single Action
+Deploy (only after operator lifts the "no image rebuild" freeze): UAT `9router-source` runs a **baked image**, no source bind mount, so this needs commit + push `david-dev` + `ssh p106-platform 'cd /opt/9router && git fetch origin && git reset --hard origin/david-dev'` + detached `docker compose build --no-cache 9router` + detached `up -d --force-recreate 9router` (rebuild never touches `9router-data`). Then open `/dashboard/combos`, press **Duplicates (N)**, tick the 24-model set, keep `free-coding-max`, remove → 83 → 75. The `pm/ba/qa` (12→1) and `dev/supervisor` (8→1) sets need each CLI's config checked first.
+
+### Not deployed — verified 2026-09-16 (rebuild frozen by operator)
+- UAT `/opt/9router` HEAD = `54fbd689` (pre-dates this work); local changes uncommitted → cannot be on the server.
+- Deployed container `9router-source` (Up 2 days, image `fdf8e633e614`) has `/app/.next/server/app/api/combos` = `[id]`, `health`, `route.js` — **no `duplicates` route**; string `duplicateGroups` absent from built server → old UI.
+- `/api/combos/duplicates` → 401 (unknown API paths also 401; `/api/health` → 200), so the endpoint is not live.
+- `9router-data` intact (`/app/data`: `db/`, `auth/`, `logs/`, `jwt-secret`, `machine-id`); nothing pruned, no container recreated.
+
+
+---
+# Task History
+
 ## Goal (COMPLETE ✅ + DEPLOYED ✅)
 Improve combo model routing resilience: fix probe false-blocking, add exception cooldowns, expose runtime tier status to health API. **Deployed to UAT (p106) 2026-09-14.**
 
@@ -186,3 +226,29 @@ node scripts/build-cli-combos.mjs --apply --roles pm,ba,dev,qa,supervisor
 ## Files
 - **Read**: `open-sse/providers/capabilities.js`, registry files, `capacityAdapter.js`, `combo.js`, `providers.js`
 - **Edited**: `scripts/build-cli-combos.mjs` — added `--roles` flag, `ROLE_PROFILES`, `ROLE_MODE`, `EFFECTIVE_CROSS_PROVIDER`, `passesRoleFilter()`, `getRoleModels()`, role-mode branches in `listModels()` and `runOnce()`, 10 new self-check tests
+
+---
+
+## Current Task — Custom provider token usage on dashboard — FIXED, DEPLOYED ✅
+
+### Problem
+Custom/OpenAI-compatible providers (e.g. kilo-gateway `kgw/*`) were not returning token usage data on the dashboard. Root cause: `DefaultExecutor.transformRequest()` did not inject `stream_options: { include_usage: true }` for streaming requests, so providers omitted the usage field in the final SSE chunk.
+
+### Changes (commit `7806e21e` → `f1af024e`)
+- **`open-sse/executors/default.js`**: Added `stream_options: { include_usage: true }` injection in `transformRequest()` for streaming requests, matching the pattern already used by `IFlowExecutor`. Restored original method flow (`applyJsonSchemaFallback`, quirk handling, `stripUnsupportedParams`, `injectReasoningContent`) — initial commit had an early `return body;` that made the remainder dead code.
+- **`open-sse/handlers/chatCore/nonStreamingHandler.js`**: Added fallback token estimation (~4 chars/token) when `extractUsageFromResponse` returns null/empty. Removed duplicate `const usage` declaration that conflicted with existing `const usage` at line 319; replaced non-existent `estimateUsage` with inline char-count estimate; imported `hasValidUsage` from `usageTracking.js`.
+
+### Verification
+- `tests/unit/fusion-strip-stream-options-3024.test.js` → 2/2 passed (confirms `stream_options` handling is compatible with combo logic)
+- `tests/unit/antigravity-stream-options.test.js` → 2/2 passed
+- `node --check` on both modified files → syntax OK
+
+### Deployment (UAT p106-platform)
+- **Backup**: `9router-data-before-rebuild-2026-09-21.tar.gz` (10MB) created at `/opt/9router/backups/`
+- **Code pulled**: `git fetch origin && git reset --hard origin/david-dev` → HEAD at `f1af024e`
+- **Build**: `docker compose build --no-cache 9router` → completed (image sha256:3319273...)
+- **Recreate**: `docker compose up -d --force-recreate 9router` → new container `addb03524e9d`
+- **Health**: `curl localhost:20130/api/health` → `{"ok":true}` (source), port 20131 → `{"ok":true}` (master fallback)
+- **Logs confirm token tracking**: `IN 101137 (CACHE ↻101056) · OUT 114`, `IN 101488 (CACHE ↻101248) · OUT 320` for custom provider (kgw/*) requests
+- **Migrates**: None needed — changes are runtime code, schema auto-syncs at startup
+- **Remotes**: Pushed to `origin`, `improvement`, `upstream` (all up-to-date)
