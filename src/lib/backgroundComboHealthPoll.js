@@ -3,6 +3,7 @@
 // Follows the same fail-open pattern as backgroundTokenRefresh.js.
 
 import { getCombos, getProviderConnections, getProviderNodes } from "@/lib/localDb";
+import { curateAutoCombos } from "@/lib/combos/autoCurate.js";
 import { getCombosHealth } from "@/lib/comboHealth";
 import { pingModelByKind } from "@/app/api/models/test/ping";
 import { makeKv } from "@/lib/db/helpers/kvStore";
@@ -150,6 +151,11 @@ async function tick() {
     // Store poll metadata
     const metaKv = makeKv("comboHealthMeta");
     await metaKv.setMany({ _lastPollAt: { value: new Date(now).toISOString(), combos: combos.length } });
+
+    // Re-derive auto combos (role-*/auto-* names) from this tick's healthy set
+    await curateAutoCombos({ combos, staticHealth, probes }).catch((e) => {
+      console.error("[ComboAutoCurate] error:", e?.message || e);
+    });
 
     console.log(`[ComboHealthPoll] Polled ${combos.length} combos (${probes.filter(p => p.status === "healthy").length} healthy)`);
   } catch (err) {
