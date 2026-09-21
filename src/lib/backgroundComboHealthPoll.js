@@ -153,7 +153,7 @@ async function tick() {
     await metaKv.setMany({ _lastPollAt: { value: new Date(now).toISOString(), combos: combos.length } });
 
     // Re-derive auto combos (role-*/auto-* names) from this tick's healthy set
-    await curateAutoCombos({ combos, staticHealth, probes }).catch((e) => {
+    await curateAutoCombos({ combos, staticHealth, probes, connections }).catch((e) => {
       console.error("[ComboAutoCurate] error:", e?.message || e);
     });
 

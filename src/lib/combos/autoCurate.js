@@ -83,10 +83,31 @@ function isFree(entry) {
   return p != null && (p.input || 0) === 0 && (p.output || 0) === 0;
 }
 
+const DISCOVERY_TIMEOUT_MS = 8000;
+
+// Fetch a custom gateway's model list (OpenAI-style GET {baseUrl}/models).
+async function fetchNodeModels(connection) {
+  const baseUrl = connection?.providerSpecificData?.baseUrl;
+  const apiKey = connection?.apiKey;
+  if (!baseUrl) return [];
+  try {
+    const res = await fetch(`${String(baseUrl).replace(/\/$/, "")}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+    });
+    if (!res.ok) return [];
+    const body = await res.json().catch(() => null);
+    const data = body?.data || body?.models || [];
+    return (Array.isArray(data) ? data : []).map((m) => (typeof m === "string" ? m : m?.id)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 // Build candidate pool: models proven healthy this tick + inventory models on
 // prefixes that have at least one healthy model (discovered, validated by the
 // next poll — dead picks get flagged unavailable and dropped next tick).
-async function buildCandidates(healthySet, freeOnly) {
+async function buildCandidates(healthySet, freeOnly, connections) {
   const healthyPrefixes = new Set([...healthySet].map((r) => r.split("/")[0]));
   const byRouted = new Map();
 
@@ -126,10 +147,30 @@ async function buildCandidates(healthySet, freeOnly) {
   for (const entry of byRouted.values()) {
     if (healthyPrefixes.has(entry.provider) && !out.includes(entry)) out.push(entry);
   }
+
+  // upstream discovery: ask healthy custom gateways (providerSpecificData.baseUrl)
+  // for their /models list — catches new models not yet in any combo/inventory
+  if (!["0", "false"].includes(String(process.env.COMBO_AUTOCURATE_DISCOVERY ?? "1").toLowerCase())) {
+    const conns = (connections || []).filter(
+      (c) => c?.providerSpecificData?.baseUrl && healthyPrefixes.has(c.providerSpecificData?.prefix)
+    );
+    for (const conn of conns) {
+      const prefix = conn.providerSpecificData.prefix;
+      for (const id of await fetchNodeModels(conn)) {
+        const routed = `${prefix}/${id}`;
+        if (byRouted.has(routed)) continue;
+        const caps = getCapabilitiesForModel(prefix, id);
+        const entry = { provider: prefix, model: id, routedModel: routed, caps, pricing: null };
+        if (!isChat(prefix, id) || (freeOnly && !isFree(entry))) continue;
+        byRouted.set(routed, entry);
+        out.push(entry);
+      }
+    }
+  }
   return out;
 }
 
-export async function curateAutoCombos({ combos, staticHealth, probes }) {
+export async function curateAutoCombos({ combos, staticHealth, probes, connections }) {
   if (!autoCurateEnabled()) return null;
 
   const autoCombos = (combos || []).filter((c) => autoComboRole(c.name));
@@ -152,7 +193,7 @@ export async function curateAutoCombos({ combos, staticHealth, probes }) {
   }
 
   const freeOnly = ["1", "true"].includes(String(process.env.COMBO_AUTOCURATE_FREE_ONLY).toLowerCase());
-  const candidates = await buildCandidates(healthySet, freeOnly);
+  const candidates = await buildCandidates(healthySet, freeOnly, connections);
 
   const changes = [];
   for (const combo of autoCombos) {
