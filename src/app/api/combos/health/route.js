@@ -89,9 +89,16 @@ function classifyProbeCooldown(status, errorText) {
   return PROBE_COOLDOWN[reason] ?? PROBE_COOLDOWN.transient;
 }
 
-export async function POST() {
+export async function POST(request) {
   try {
-    const combos = (await getCombos()).filter((combo) => !combo.kind || combo.kind === "llm");
+    // ?id=<comboId> probes a single combo; omitting it probes all (dashboard
+    // "Check Health" button and manual full re-check).
+    const id = request.nextUrl.searchParams.get("id");
+    let combos = (await getCombos()).filter((combo) => !combo.kind || combo.kind === "llm");
+    if (id) combos = combos.filter((combo) => combo.id === id);
+    if (id && combos.length === 0) {
+      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+    }
     const probes = await Promise.all(combos.map(async (combo) => {
       try {
         const result = await pingModelByKind(combo.name, "chat");

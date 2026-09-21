@@ -1,17 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
-import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
+import { useState, useEffect, useMemo } from "react";
+import { Card, Button, Modal, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, ComboFormModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
-import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
-
-// Validate combo name: only a-z, A-Z, 0-9, -, _
-const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
+import { useHeaderSearchStore } from "@/store/headerSearchStore";
+import { buildDuplicateGroups } from "@/lib/combos/duplicateGroups";
 
 // Capacity adapter: global fallback pools of models per input-modality capability.
 // A request needing a capability the target model/combo lacks switches straight
@@ -29,6 +23,15 @@ const COMBO_SORT_OPTIONS = [
   { value: "models", label: "Model count: high to low" },
 ];
 const HEALTH_SORT_RANK = { unavailable: 0, degraded: 1, "no-models": 2, healthy: 3 };
+const COMBO_HEALTH_FILTERS = [
+  { value: "all", label: "Health: all" },
+  { value: "attention", label: "Needs attention" },
+  { value: "healthy", label: "Healthy" },
+  { value: "degraded", label: "Degraded" },
+  { value: "unavailable", label: "Unavailable" },
+  { value: "no-models", label: "No models" },
+];
+const HEALTH_REFRESH_MS = 60 * 1000;
 const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [] };
 
 // Combo templates for quick creation
@@ -110,6 +113,11 @@ export default function CombosPage() {
   const [comboProbes, setComboProbes] = useState({});
   const [probing, setProbing] = useState(false);
   const [sortMode, setSortMode] = useState("default");
+  const [healthFilter, setHealthFilter] = useState("all");
+  const [providerFilter, setProviderFilter] = useState("all");
+  const searchQuery = useHeaderSearchStore((s) => s.query);
+  const registerSearch = useHeaderSearchStore((s) => s.register);
+  const unregisterSearch = useHeaderSearchStore((s) => s.unregister);
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -117,10 +125,33 @@ export default function CombosPage() {
   const [fixingComboId, setFixingComboId] = useState(null);
   const [fixingAll, setFixingAll] = useState(false);
   const [fixResults, setFixResults] = useState({});
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupSel, setDupSel] = useState({});
+  const [pruning, setPruning] = useState(false);
+
+  useEffect(() => {
+    registerSearch("Search combos or models...");
+    return () => unregisterSearch();
+  }, [registerSearch, unregisterSearch]);
 
   useEffect(() => {
     fetchData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-poll passive health while the page is open so stale flags and
+  // lastPollAt stay fresh without a full reload.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch("/api/combos/health");
+        if (!res.ok) return;
+        const data = await res.json();
+        setComboHealth(Object.fromEntries((data.health || []).map((item) => [item.id, item])));
+        setLastPollAt(data.lastPollAt || null);
+      } catch { /* keep last known health on transient errors */ }
+    }, HEALTH_REFRESH_MS);
+    return () => clearInterval(id);
+  }, []);
 
   const fetchData = async () => {
     try {
@@ -179,10 +210,10 @@ export default function CombosPage() {
     }
   };
 
-  // Probe a single combo via health endpoint (reuses the same POST /api/combos/health)
+  // Probe a single combo — POST /api/combos/health?id= limits the probe to one combo
   const handleProbeSingle = async (comboId) => {
     try {
-      const res = await fetch("/api/combos/health", { method: "POST" });
+      const res = await fetch(`/api/combos/health?id=${encodeURIComponent(comboId)}`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to probe");
       const probe = (data.probes || []).find((p) => p.id === comboId);
@@ -350,9 +381,107 @@ export default function CombosPage() {
     [comboHealth],
   );
 
+  // Combos whose model list is byte-identical to another combo's: redundant
+  // copies that only differ by name (legacy aliases, per-agent duplicates).
+  const dupGroups = useMemo(() => buildDuplicateGroups(combos), [combos]);
+  const dupRedundantCount = useMemo(
+    () => dupGroups.reduce((total, g) => total + g.members.length - 1, 0),
+    [dupGroups],
+  );
+  const dupSiblingsByName = useMemo(
+    () => Object.fromEntries(
+      dupGroups.flatMap((g) => g.members.map((name) => [name, g.members.filter((n) => n !== name)])),
+    ),
+    [dupGroups],
+  );
+  // How many combos the current modal ticks would delete (keeper excluded).
+  const dupDeleteCount = useMemo(
+    () => dupGroups.reduce((total, g) => (total + (dupSel[g.signature]?.apply ? g.members.length - 1 : 0)), 0),
+    [dupGroups, dupSel],
+  );
+
+  const openDupModal = () => {
+    setDupSel(Object.fromEntries(dupGroups.map((g) => [
+      g.signature,
+      // Only pre-tick groups the heuristic can collapse without guessing: those
+      // holding legacy-name leftovers. Safe either way — a keeper always survives.
+      { apply: g.duplicates.length > 0, keeper: g.suggestedKeeper },
+    ])));
+    setDupOpen(true);
+  };
+
+  const handlePruneDuplicates = async () => {
+    const names = [];
+    const keepNames = [];
+    for (const g of dupGroups) {
+      const sel = dupSel[g.signature];
+      if (!sel?.apply) continue;
+      keepNames.push(sel.keeper);
+      names.push(...g.members.filter((n) => n !== sel.keeper));
+    }
+    if (names.length === 0) return;
+    setPruning(true);
+    try {
+      const res = await fetch("/api/combos/duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, names, keepNames }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to remove duplicates");
+        return;
+      }
+      await fetchData();
+      setDupOpen(false);
+    } catch (error) {
+      console.log("Error removing duplicate combos:", error);
+      alert("Failed to remove duplicates");
+    } finally {
+      setPruning(false);
+    }
+  };
+
+  // Distinct provider prefixes across all combos, for the provider filter.
+  const providerOptions = useMemo(() => {
+    const prefixes = new Set();
+    for (const c of combos) {
+      for (const m of c.models || []) {
+        const prefix = m.split("/")[0];
+        if (prefix) prefixes.add(prefix);
+      }
+    }
+    return [
+      { value: "all", label: "Provider: all" },
+      ...[...prefixes].sort().map((p) => ({ value: p, label: p })),
+    ];
+  }, [combos]);
+
+  const isFiltering =
+    searchQuery.trim() !== "" || healthFilter !== "all" || providerFilter !== "all";
+
+  const filteredCombos = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return combos.filter((combo) => {
+      if (healthFilter !== "all") {
+        const status = comboHealth[combo.id]?.status;
+        if (healthFilter === "attention") {
+          if (status !== "degraded" && status !== "unavailable") return false;
+        } else if (status !== healthFilter) return false;
+      }
+      if (providerFilter !== "all" && !(combo.models || []).some((m) => m.startsWith(`${providerFilter}/`))) return false;
+      if (q) {
+        const inName = (combo.name || "").toLowerCase().includes(q);
+        const inModels = (combo.models || []).some((m) => m.toLowerCase().includes(q));
+        if (!inName && !inModels) return false;
+      }
+      return true;
+    });
+  }, [combos, comboHealth, searchQuery, healthFilter, providerFilter]);
+
   const sortedCombos = useMemo(() => {
-    if (sortMode === "default") return combos;
-    return [...combos].sort((a, b) => {
+    if (sortMode === "default") return filteredCombos;
+    return [...filteredCombos].sort((a, b) => {
       if (sortMode === "health") {
         const healthDiff = (HEALTH_SORT_RANK[comboHealth[a.id]?.status] ?? 4) - (HEALTH_SORT_RANK[comboHealth[b.id]?.status] ?? 4);
         if (healthDiff) return healthDiff;
@@ -363,7 +492,7 @@ export default function CombosPage() {
       }
       return (a.name || "").localeCompare(b.name || "");
     });
-  }, [combos, comboHealth, sortMode]);
+  }, [filteredCombos, comboHealth, sortMode]);
 
   if (loading) {
     return (
@@ -398,9 +527,18 @@ export default function CombosPage() {
                 {fixingAll ? "Fixing..." : `Fix All (${degradedCount})`}
               </Button>
             )}
-            {lastPollAt && (
+            {dupGroups.length > 0 && (
+              <Button icon="content_copy" variant="ghost" onClick={openDupModal} className="whitespace-nowrap" title="Combos that repeat another combo's model list">
+                {`Duplicates (${dupRedundantCount})`}
+              </Button>
+            )}
+            {lastPollAt ? (
               <span className="text-[11px] text-text-muted whitespace-nowrap" title={`Auto-polled at ${new Date(lastPollAt).toLocaleString()}`}>
                 Last: {new Date(lastPollAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            ) : (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap" title="Background health poll has not run yet — statuses reflect provider config only">
+                Never probed
               </span>
             )}
             {staleProbeCount > 0 && (
@@ -432,7 +570,29 @@ export default function CombosPage() {
         </Card>
        ) : (
          <div className="flex flex-col gap-4">
-           <div className="flex justify-end">
+           <div className="flex flex-wrap items-center gap-2">
+             {isFiltering && (
+               <span className="text-[11px] text-text-muted whitespace-nowrap">
+                 {filteredCombos.length} of {combos.length} shown
+               </span>
+             )}
+             <div className="flex-1" />
+             <div className="w-full sm:w-[160px]">
+               <Select
+                 options={COMBO_HEALTH_FILTERS}
+                 value={healthFilter}
+                 onChange={(e) => setHealthFilter(e.target.value)}
+                 selectClassName="py-1.5 text-xs"
+               />
+             </div>
+             <div className="w-full sm:w-[160px]">
+               <Select
+                 options={providerOptions}
+                 value={providerFilter}
+                 onChange={(e) => setProviderFilter(e.target.value)}
+                 selectClassName="py-1.5 text-xs"
+               />
+             </div>
              <div className="w-full sm:w-[240px]">
                <Select
                  options={COMBO_SORT_OPTIONS}
@@ -442,6 +602,12 @@ export default function CombosPage() {
                />
              </div>
            </div>
+           {sortedCombos.length === 0 && (
+             <div className="text-center py-8 border border-dashed border-border rounded-xl">
+               <span className="material-symbols-outlined text-[32px] text-text-muted mb-2">search_off</span>
+               <p className="text-text-muted text-sm">No combos match your search or filters</p>
+             </div>
+           )}
            {sortedCombos.map((combo) => (
             <ComboCard
               key={combo.id}
@@ -455,6 +621,7 @@ export default function CombosPage() {
               strategy={comboStrategies[combo.name] || {}}
                health={comboHealth[combo.id]}
                probe={comboProbes[combo.id]}
+               dupSiblings={dupSiblingsByName[combo.name]}
                onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
                onFix={() => handleFixCombo(combo.id)}
                fixing={fixingComboId === combo.id}
@@ -495,6 +662,78 @@ export default function CombosPage() {
           activeProviders={activeProviders}
         />
       )}
+
+      {/* Duplicate model-set pruning */}
+      <Modal
+        isOpen={dupOpen}
+        onClose={() => setDupOpen(false)}
+        title="Duplicate Combos"
+        size="full"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDupOpen(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              icon="delete_sweep"
+              onClick={handlePruneDuplicates}
+              disabled={pruning || dupDeleteCount === 0}
+            >
+              {pruning ? "Removing..." : `Remove ${dupDeleteCount} combo${dupDeleteCount === 1 ? "" : "s"}`}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text-muted">
+          {dupGroups.length} set{dupGroups.length === 1 ? "" : "s"} of combos repeat the exact same model list.
+          Tick a set, choose the one name to keep, and the rest are removed.
+        </p>
+        <p className="mt-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          Removing a name breaks any client still calling it (CLI config, agent, script). Check external configs
+          before applying; combos are not restorable after deletion.
+        </p>
+        <div className="mt-4 flex flex-col gap-3">
+          {dupGroups.map((group) => {
+            const sel = dupSel[group.signature] || { apply: false, keeper: group.suggestedKeeper };
+            return (
+              <div key={group.signature} className="rounded-[10px] border border-border-subtle p-3">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="size-4 shrink-0"
+                    checked={!!sel.apply}
+                    onChange={(e) => setDupSel((prev) => ({
+                      ...prev,
+                      [group.signature]: { ...sel, apply: e.target.checked },
+                    }))}
+                  />
+                  <span className="text-sm font-medium">
+                    {group.members.length} combos · {group.modelCount} models each
+                  </span>
+                </label>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {group.members.map((name) => (
+                    <label key={name} className="flex cursor-pointer items-center gap-1.5 font-mono text-xs">
+                      <input
+                        type="radio"
+                        name={`keeper-${group.signature}`}
+                        className="size-3.5 shrink-0"
+                        checked={sel.keeper === name}
+                        onChange={() => setDupSel((prev) => ({
+                          ...prev,
+                          [group.signature]: { ...sel, keeper: name },
+                        }))}
+                      />
+                      <span className={sel.keeper === name ? "text-emerald-600 dark:text-emerald-400" : "text-text-muted"}>
+                        {name}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Modal>
 
       {/* Confirm Delete Modal */}
       <ConfirmModal
@@ -577,8 +816,9 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy, onFix, fixing, fixResult, onProbe }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, health, probe: _probeIgnored, onSetStrategy, onFix, fixing, fixResult, onProbe, dupSiblings = [] }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
@@ -604,6 +844,12 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
     return map;
   }, [probe, health]);
 
+  // Runtime cooldown tiers per model: healthy | retryable | exhausted.
+  const tierMap = useMemo(
+    () => Object.fromEntries((health?.modelTiers || []).map((t) => [t.model, t])),
+    [health],
+  );
+
   const needsFix = health && (health.status === "degraded" || health.status === "unavailable");
 
   return (
@@ -616,6 +862,14 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
+              {dupSiblings.length > 0 && (
+                <span
+                  className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+                  title={`Same ${combo.models.length}-model list as: ${dupSiblings.join(", ")}`}
+                >
+                  duplicate set ×{dupSiblings.length + 1}
+                </span>
+              )}
               <ComboHealthBadge health={health} />
               <ProbeBadge probe={probe} probeStale={health?.probeStale} />
             </div>
@@ -647,9 +901,45 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
                 })
               )}
               {combo.models.length > 3 && (
-                <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
+                <button
+                  onClick={() => setExpanded((v) => !v)}
+                  className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5 transition-colors"
+                  title={expanded ? "Collapse model list" : `Show all ${combo.models.length} models`}
+                >
+                  <span className="material-symbols-outlined text-[12px]">{expanded ? "expand_less" : "expand_more"}</span>
+                  {expanded ? "Show less" : `+${combo.models.length - 3} more`}
+                </button>
               )}
             </div>
+            {/* Expanded: full ordered fallback chain with per-model health/tier */}
+            {expanded && combo.models.length > 0 && (
+              <div className="mt-1.5 flex max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto rounded-md border border-border-subtle p-1.5">
+                {combo.models.map((model, index) => {
+                  const modelOk = modelHealthMap[model];
+                  const hasProbe = model in modelHealthMap;
+                  const tier = tierMap[model];
+                  return (
+                    <div key={`${model}-${index}`} className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.03]">
+                      <span className="w-4 shrink-0 text-right text-[10px] font-medium text-text-muted">{index + 1}</span>
+                      <span
+                        className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${hasProbe ? (modelOk ? "bg-emerald-500" : "bg-red-500") : "bg-text-muted/30"}`}
+                        title={hasProbe ? (modelOk ? "Model healthy" : "Model unavailable") : "No probe data"}
+                      />
+                      <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-muted">{model}</code>
+                      {tier && tier.tier !== "healthy" && (
+                        <span
+                          className={`shrink-0 rounded px-1 py-px text-[9px] font-medium ${tier.tier === "retryable" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-red-500/10 text-red-600 dark:text-red-400"}`}
+                          title={tier.blockedUntilMs ? `Auto-pushed to tail until ${new Date(tier.blockedUntilMs).toLocaleTimeString()}` : tier.tier}
+                        >
+                          {tier.tier === "retryable" ? "cooldown" : "blocked"}
+                        </span>
+                      )}
+                      <CapacityBadges caps={getCaps?.(model)} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {/* Broken connection diagnostics */}
             {health?.brokenConnections?.length > 0 && (
               <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">
@@ -926,307 +1216,5 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
         />
       )}
     </Card>
-  );
-}
-
-function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMoveDown, onRemove }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useSortable({ id });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    // no transition — prevents the CSS settle animation fighting React's re-render on drop
-    opacity: isDragging ? 0.4 : 1,
-    zIndex: isDragging ? 999 : undefined,
-  };
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(model);
-  const commit = () => {
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== model) onEdit(trimmed);
-    else setDraft(model);
-    setEditing(false);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") commit();
-    if (e.key === "Escape") { setDraft(model); setEditing(false); }
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 bg-black/[0.02] hover:bg-black/[0.04] dark:bg-white/[0.02] dark:hover:bg-white/[0.04] transition-colors ${isDragging ? "shadow-md ring-1 ring-primary/30" : ""}`}
-    >
-      {/* Drag handle */}
-      <button
-        {...attributes}
-        {...listeners}
-        type="button"
-        className="cursor-grab touch-none p-0.5 rounded text-text-muted hover:text-primary active:cursor-grabbing shrink-0"
-        title="Drag to reorder"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="9" cy="4" r="2"/><circle cx="15" cy="4" r="2"/>
-          <circle cx="9" cy="12" r="2"/><circle cx="15" cy="12" r="2"/>
-          <circle cx="9" cy="20" r="2"/><circle cx="15" cy="20" r="2"/>
-        </svg>
-      </button>
-
-      {/* Index badge */}
-      <span className="text-[10px] font-medium text-text-muted w-3 text-center shrink-0">{index + 1}</span>
-
-      {/* Inline editable model value */}
-      {editing ? (
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={handleKeyDown}
-          className="min-w-0 flex-1 rounded border border-primary/40 bg-white px-1.5 py-0.5 font-mono text-xs text-text-main outline-none dark:bg-black/20"
-        />
-      ) : (
-        <div
-          className="min-w-0 flex-1 cursor-text truncate rounded px-1.5 py-0.5 font-mono text-xs text-text-main hover:bg-black/5 dark:hover:bg-white/5"
-          onClick={() => setEditing(true)}
-          title="Click to edit"
-        >
-          {model}
-        </div>
-      )}
-
-      {/* Priority arrows */}
-      <div className="flex shrink-0 items-center gap-0.5">
-        <button
-          onClick={onMoveUp}
-          disabled={isFirst}
-          className={`p-0.5 rounded ${isFirst ? "text-text-muted/20 cursor-not-allowed" : "text-text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5"}`}
-          title="Move up"
-        >
-          <span className="material-symbols-outlined text-[12px]">arrow_upward</span>
-        </button>
-        <button
-          onClick={onMoveDown}
-          disabled={isLast}
-          className={`p-0.5 rounded ${isLast ? "text-text-muted/20 cursor-not-allowed" : "text-text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5"}`}
-          title="Move down"
-        >
-          <span className="material-symbols-outlined text-[12px]">arrow_downward</span>
-        </button>
-      </div>
-
-      {/* Remove */}
-      <button
-        onClick={onRemove}
-        className="p-0.5 hover:bg-red-500/10 rounded text-text-muted hover:text-red-500 transition-all"
-        title="Remove"
-      >
-        <span className="material-symbols-outlined text-[12px]">close</span>
-      </button>
-    </div>
-  );
-}
-
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null }) {
-  // Initialize state with combo values - key prop on parent handles reset on remount
-  const [name, setName] = useState(combo?.name || "");
-  const [models, setModels] = useState(combo?.models || []);
-  const [showModelSelect, setShowModelSelect] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [nameError, setNameError] = useState("");
-  const [modelAliases, setModelAliases] = useState({});
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  // Use stable index-based IDs so duplicates and similar names are handled correctly
-  const modelItems = models.map((model, i) => ({ uid: `item-${i}`, model }));
-
-  const handleDragEnd = (event) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      const oldIndex = modelItems.findIndex((m) => m.uid === active.id);
-      const newIndex = modelItems.findIndex((m) => m.uid === over.id);
-      if (oldIndex !== -1 && newIndex !== -1) {
-        setModels((prev) => arrayMove(prev, oldIndex, newIndex));
-      }
-    }
-  };
-
-  const fetchModalData = async () => {
-    try {
-      const aliasesRes = await fetch("/api/models/alias");
-      if (!aliasesRes.ok) return;
-      const aliasesData = await aliasesRes.json();
-      setModelAliases(aliasesData.aliases || {});
-    } catch (error) {
-      console.error("Error fetching modal data:", error);
-    }
-  };
-
-  useEffect(() => {
-    if (isOpen) fetchModalData();
-  }, [isOpen]);
-
-  const validateName = (value) => {
-    if (!value.trim()) {
-      setNameError("Name is required");
-      return false;
-    }
-    if (!VALID_NAME_REGEX.test(value)) {
-      setNameError("Only letters, numbers, -, _ and . allowed");
-      return false;
-    }
-    setNameError("");
-    return true;
-  };
-
-  const handleNameChange = (e) => {
-    const value = e.target.value;
-    setName(value);
-    if (value) validateName(value);
-    else setNameError("");
-  };
-
-  const handleAddModel = (model) => {
-    if (!models.includes(model.value)) {
-      setModels([...models, model.value]);
-    }
-  };
-
-  const handleDeselectModel = (model) => {
-    setModels(models.filter((m) => m !== model.value));
-  };
-
-  const handleRemoveModel = (index) => {
-    setModels(models.filter((_, i) => i !== index));
-  };
-
-  const handleMoveUp = (index) => {
-    if (index === 0) return;
-    const newModels = [...models];
-    [newModels[index - 1], newModels[index]] = [newModels[index], newModels[index - 1]];
-    setModels(newModels);
-  };
-
-  const handleMoveDown = (index) => {
-    if (index === models.length - 1) return;
-    const newModels = [...models];
-    [newModels[index], newModels[index + 1]] = [newModels[index + 1], newModels[index]];
-    setModels(newModels);
-  };
-
-  const handleSave = async () => {
-    if (!validateName(name)) return;
-    setSaving(true);
-    await onSave({ name: name.trim(), models });
-    setSaving(false);
-  };
-
-  const isEdit = !!combo;
-
-  return (
-    <>
-      <Modal
-        isOpen={isOpen}
-        onClose={onClose}
-        title={isEdit ? "Edit Combo" : "Create Combo"}
-      >
-        <div className="flex flex-col gap-3">
-          {/* Name */}
-          <div>
-            <Input
-              label="Combo Name"
-              value={name}
-              onChange={handleNameChange}
-              placeholder="my-combo"
-              error={nameError}
-            />
-            <p className="text-[10px] text-text-muted mt-0.5">
-              Only letters, numbers, -, _ and . allowed
-            </p>
-          </div>
-
-          {/* Models */}
-          <div>
-            <label className="text-sm font-medium mb-1.5 block">Models</label>
-
-            {models.length === 0 ? (
-              <div className="text-center py-4 border border-dashed border-black/10 dark:border-white/10 rounded-lg bg-black/[0.01] dark:bg-white/[0.01]">
-                <span className="material-symbols-outlined text-text-muted text-xl mb-1">layers</span>
-                <p className="text-xs text-text-muted">No models added yet</p>
-              </div>
-            ) : (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToVerticalAxis, restrictToParentElement]}>
-              <SortableContext items={modelItems.map((m) => m.uid)} strategy={verticalListSortingStrategy}>
-                <div className="flex max-h-[55vh] min-w-0 flex-col gap-1 overflow-y-auto sm:max-h-[350px]">
-                  {modelItems.map(({ uid, model }, index) => (
-                    <ModelItem
-                      key={uid}
-                      id={uid}
-                      index={index}
-                      model={model}
-                      isFirst={index === 0}
-                      isLast={index === modelItems.length - 1}
-                      onEdit={(newVal) => {
-                        const updated = [...models];
-                        updated[index] = newVal;
-                        setModels(updated);
-                      }}
-                      onMoveUp={() => handleMoveUp(index)}
-                      onMoveDown={() => handleMoveDown(index)}
-                      onRemove={() => handleRemoveModel(index)}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-            )}
-
-            {/* Add Model button */}
-            <button
-              onClick={() => setShowModelSelect(true)}
-              className="w-full mt-2 py-2 border border-dashed border-black/10 dark:border-white/10 rounded-lg text-xs text-primary font-medium hover:text-primary hover:border-primary/50 transition-colors flex items-center justify-center gap-1"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Add Model
-            </button>
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-col gap-2 pt-1 sm:flex-row">
-            <Button onClick={onClose} variant="ghost" fullWidth size="sm">
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              fullWidth
-              size="sm"
-              disabled={!name.trim() || !!nameError || saving}
-            >
-              {saving ? "Saving..." : isEdit ? "Save" : "Create"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Model Select Modal */}
-      {showModelSelect && (
-        <ModelSelectModal
-          isOpen={showModelSelect}
-          onClose={() => setShowModelSelect(false)}
-          onSelect={handleAddModel}
-          onDeselect={handleDeselectModel}
-          activeProviders={activeProviders}
-          modelAliases={modelAliases}
-          title="Add Model to Combo"
-          kindFilter={kindFilter}
-          addedModelValues={models}
-          closeOnSelect={false}
-        />
-      )}
-    </>
   );
 }

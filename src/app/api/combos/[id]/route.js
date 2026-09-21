@@ -1,6 +1,23 @@
 import { NextResponse } from "next/server";
-import { getComboById, updateCombo, deleteCombo, getComboByName } from "@/lib/localDb";
+import { getComboById, updateCombo, deleteCombo, getComboByName, getSettings, updateSettings } from "@/lib/localDb";
 import { resetComboRotation } from "open-sse/services/combo.js";
+
+// Strategies are keyed by combo name (clients address combos by name in `model`),
+// so a rename/delete must move or drop the entry or it silently orphans.
+async function syncComboStrategyKey(prevName, nextName) {
+  if (!prevName || prevName === nextName) return;
+  try {
+    const settings = await getSettings();
+    const strategies = settings.comboStrategies || {};
+    if (!Object.prototype.hasOwnProperty.call(strategies, prevName)) return;
+    const updated = { ...strategies };
+    if (nextName) updated[nextName] = strategies[prevName];
+    delete updated[prevName];
+    await updateSettings({ comboStrategies: updated });
+  } catch (err) {
+    console.log("Error migrating combo strategy on rename/delete:", err);
+  }
+}
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -52,6 +69,7 @@ export async function PUT(request, { params }) {
     // Invalidate rotation state (models/strategy/name may have changed)
     if (prev?.name) resetComboRotation(prev.name);
     if (combo.name && combo.name !== prev?.name) resetComboRotation(combo.name);
+    await syncComboStrategyKey(prev?.name, combo.name);
 
     return NextResponse.json(combo);
   } catch (error) {
@@ -72,6 +90,7 @@ export async function DELETE(request, { params }) {
     }
 
     if (prev?.name) resetComboRotation(prev.name);
+    await syncComboStrategyKey(prev?.name, null);
     
     return NextResponse.json({ success: true });
   } catch (error) {

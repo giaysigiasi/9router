@@ -111,6 +111,67 @@ Auto-fix a degraded combo by removing unroutable models.
 
 ---
 
+## 6. Duplicate Model-Set Detection & Prune
+
+The dashboard flags combos that configure the byte-identical ordered model list — legacy aliases, per-agent copies — and can collapse each set to one name.
+
+**What it does**
+- Header button **Duplicates (N)** appears when any model list is shared by 2+ combos. N = redundant combos (`members − 1` per set).
+- Each affected `ComboCard` shows an amber `duplicate set ×K` badge; the tooltip lists the sibling names.
+- The modal lists every set with a checkbox (apply) and a radio per member (keeper). Keepers default to the non-legacy name (`free-coding-max` rather than `1-coding-max`) and the checkbox is pre-ticked only for sets that contain legacy-named leftovers.
+- Confirm deletes every non-keeper in the ticked sets, then refreshes the list.
+
+**Safety**
+- A set can never lose its last member: the server refuses to delete every member of a group.
+- Only names that actually share a model list with another combo can be deleted; other names come back as `skipped`.
+- Deleting a name breaks clients still calling it (CLI config, agent, script). The modal says so before you confirm.
+
+**Files**
+- `src/lib/combos/duplicateGroups.js` (new) — pure grouping/prune logic: `modelSignature`, `isLegacyName`, `buildDuplicateGroups`, `buildPrunePlan`, `selectDeletableNames`.
+- `src/app/api/combos/duplicates/route.js` (new) — `GET` report, `POST { confirm: true, names, keepNames }` delete.
+- `src/app/(dashboard)/dashboard/combos/page.js` — `dupGroups`/`dupDeleteCount`/`dupSiblingsByName` memos, header button, prune modal, `dupSiblings` badge on `ComboCard`.
+- `tests/unit/combos-duplicate-groups.test.js` — 11 cases.
+- `agent-ai/orchestrator/config.js` — repointed to canonical combos (`free-reasoning`, `free-coding-max`) so the legacy numeric aliases are free to delete.
+
+---
+
+### `GET /api/combos/duplicates`
+
+Report of shared model lists.
+
+```json
+{ "groups": [ { "modelCount": 24, "members": [...], "keepers": [...], "duplicates": [...], "suggestedKeeper": "free-coding-max" } ],
+  "groupsWithDuplicates": 1, "duplicates": ["1-coding-max", "..."] }
+```
+
+### `POST /api/combos/duplicates`
+
+| Status | Body | Meaning |
+|---|---|---|
+| 200 | `{ deleted: [...], skipped: [...], duplicatesLeft, groups }` | Names removed |
+| 400 | `{ error: "Confirmation required: …" }` | Missing `confirm: true` |
+| 400 | `{ deleted: [], skipped, error: "No deletable combo names in request" }` | Nothing safe to delete |
+
+---
+
+## 7. Bug Fixes + Findability (Phase 2)
+
+**Fixes**
+- `page.js` no longer shadows the shared `ComboFormModal` with a local copy — templates (feature 3) actually render now, and `CoworkToolCard` gains drag-reorder via the shared component's dnd-kit support.
+- Per-card **Probe** calls `POST /api/combos/health?id=<comboId>` — one combo probed instead of all (was ~83 upstream calls per click).
+- `comboStrategies` stays name-keyed (clients address combos by name) but the key now follows the combo: rename cascades `comboStrategies[old] → [new]` in `PUT /api/combos/[id]`, and both single `DELETE` and bulk duplicates-prune drop strategy entries for deleted combos.
+
+**Findability / freshness**
+- Header search (`useHeaderSearchStore`, "Search combos or models…") matches combo names and model ids — same pattern as `/dashboard/providers`.
+- Toolbar filters: health (`Needs attention` / `Healthy` / `Degraded` / `Unavailable` / `No models`) and provider prefix (auto-derived from model ids). Filtered count `X of N shown` + `search_off` empty state.
+- `lastPollAt === null` renders an amber **Never probed** chip; health re-polls every 60s while the page is open.
+- Model lists are expandable: `+N more` toggles a full ordered fallback chain with per-model health dot, `cooldown`/`blocked` tier badge (from `health.modelTiers`, tooltip shows auto-unblock time), and capability badges.
+
+**Files**
+- `src/app/(dashboard)/dashboard/combos/page.js`, `src/shared/components/ComboFormModal.js`, `src/app/api/combos/health/route.js`, `src/app/api/combos/[id]/route.js`, `src/app/api/combos/duplicates/route.js`.
+
+---
+
 ## Verification
 
 - Dev server (`next dev`) starts clean; combos page returns HTTP 200 (17 KB) with no compile errors.
