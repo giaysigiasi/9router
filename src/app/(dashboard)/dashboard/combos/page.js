@@ -480,18 +480,24 @@ export default function CombosPage() {
   }, [combos, comboHealth, searchQuery, healthFilter, providerFilter]);
 
   const sortedCombos = useMemo(() => {
-    if (sortMode === "default") return filteredCombos;
-    return [...filteredCombos].sort((a, b) => {
-      if (sortMode === "health") {
-        const healthDiff = (HEALTH_SORT_RANK[comboHealth[a.id]?.status] ?? 4) - (HEALTH_SORT_RANK[comboHealth[b.id]?.status] ?? 4);
-        if (healthDiff) return healthDiff;
-      }
-      if (sortMode === "models") {
-        const modelDiff = (b.models?.length || 0) - (a.models?.length || 0);
-        if (modelDiff) return modelDiff;
-      }
-      return (a.name || "").localeCompare(b.name || "");
-    });
+    const sorted =
+      sortMode === "default"
+        ? filteredCombos
+        : [...filteredCombos].sort((a, b) => {
+            if (sortMode === "health") {
+              const healthDiff = (HEALTH_SORT_RANK[comboHealth[a.id]?.status] ?? 4) - (HEALTH_SORT_RANK[comboHealth[b.id]?.status] ?? 4);
+              if (healthDiff) return healthDiff;
+            }
+            if (sortMode === "models") {
+              const modelDiff = (b.models?.length || 0) - (a.models?.length || 0);
+              if (modelDiff) return modelDiff;
+            }
+            return (a.name || "").localeCompare(b.name || "");
+          });
+    return [
+      ...sorted.filter((c) => c.name?.startsWith("goat-")),
+      ...sorted.filter((c) => !c.name?.startsWith("goat-")),
+    ];
   }, [filteredCombos, comboHealth, sortMode]);
 
   if (loading) {
