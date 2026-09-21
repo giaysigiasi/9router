@@ -2,7 +2,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { needsTranslation } from "../../translator/index.js";
 import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
-import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
+import { addBufferToUsage, filterUsageForFormat, hasValidUsage } from "../../utils/usageTracking.js";
 import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
@@ -369,16 +369,21 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   }
 
   reqLogger.logConvertedResponse(translatedResponse);
-
   const totalLatency = Date.now() - requestStartTime;
-  const usage = extractUsageFromResponse(responseBody);
-  if (!usage || !hasValidUsage(usage)) {
-    usage = estimateUsage(body, translatedResponse?.choices?.[0]?.message?.content?.length || 0);
+  // Fallback: if provider omitted usage (common for custom providers), estimate from content length (~4 chars/token)
+  let saveUsage = usage;
+  if (!saveUsage || !hasValidUsage(saveUsage)) {
+    const outContent = String(translatedResponse?.choices?.[0]?.message?.content ?? translatedResponse?.content ?? "");
+    const inChars = (body?.messages || []).reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
+    saveUsage = {
+      prompt_tokens: Math.max(1, Math.ceil(inChars / 4)),
+      completion_tokens: Math.max(1, Math.ceil(outContent.length / 4)),
+    };
   }
   saveRequestDetail(buildRequestDetail({
     provider, model, connectionId,
     latency: { ttft: totalLatency, total: totalLatency },
-    tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
+    tokens: saveUsage || { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),
     providerRequest: finalBody || translatedBody || null,
     providerResponse: responseBody || null,

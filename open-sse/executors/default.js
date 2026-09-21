@@ -67,12 +67,12 @@ export class DefaultExecutor extends BaseExecutor {
     super(provider, PROVIDERS[provider] || PROVIDERS.openai);
   }
 
-  transformRequest(model, body, stream, credentials) {
-    // Inject stream_options for streaming requests to get usage data
+    transformRequest(model, body, stream, credentials) {
+    // Inject stream_options for streaming requests so custom/OpenAI-compatible providers return usage data
     if (stream && body.messages && !body.stream_options) {
       body.stream_options = { include_usage: true };
     }
-    return body;
+
     const transformed = this.applyJsonSchemaFallback(body);
 
     if (transformed && typeof transformed === "object") {
