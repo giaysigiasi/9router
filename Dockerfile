@@ -41,6 +41,20 @@ COPY --from=builder /app/node_modules/next ./node_modules/next
 # so the last-resort DB driver would abort with ENOENT on the missing binary.
 COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
 
+# Devin CLI — the devin-cli provider spawns `devin acp` (ACP over stdio) and
+# authenticates via ~/.local/share/devin/credentials.toml. Install the binary
+# in the image; credentials stay out of the image and are provided at runtime
+# through the persistent data volume: place credentials.toml at
+# /app/data/devin/credentials.toml (symlinked into the node user's home below).
+ARG DEVIN_CLI_VERSION=3000.10.31
+RUN apk --no-cache add gcompat libstdc++ && \
+  wget -qO /tmp/devin.tgz "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/devin-${DEVIN_CLI_VERSION}-x86_64-unknown-linux.tar.gz" && \
+  mkdir -p /opt/devin && tar -xzf /tmp/devin.tgz -C /opt/devin && rm /tmp/devin.tgz && \
+  ln -sf /opt/devin/bin/devin /usr/local/bin/devin && \
+  mkdir -p /home/node/.local/share && \
+  ln -sfn /app/data/devin /home/node/.local/share/devin && \
+  chown -R node:node /home/node/.local
+
 RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
   ln -sf /app/data-home /root/.9router 2>/dev/null || true

@@ -24,6 +24,9 @@ export default {
     format: "openai",
   },
   models: [
+    { id: "swe-2-high", name: "SWE-2 High", contextLength: 262144 },
+    { id: "swe-2-medium", name: "SWE-2 Medium", contextLength: 262144 },
+    { id: "swe-2-max", name: "SWE-2 Max", contextLength: 262144 },
     { id: "swe-1.6-fast", name: "SWE-1.6 Fast" },
     { id: "swe-1.6", name: "SWE-1.6" },
     { id: "swe-1.5-fast", name: "SWE-1.5 Fast" },
